@@ -50,6 +50,8 @@ export class Editor {
   private readonly store: SceneStore;
 
   private tool: Tool = 'pan';
+  /** 模擬模式時鎖住編輯操作 */
+  locked = false;
   private selectedId: string | null = null;
   private cursor: Vec2 | null = null;
   private draft: DraftPath | null = null;
@@ -85,6 +87,7 @@ export class Editor {
   }
 
   setTool(tool: Tool): void {
+    if (this.locked && tool !== 'pan') return;
     if (this.tool === tool) return;
     this.commitDraft();
     this.crosswalkStart = null;
@@ -120,7 +123,7 @@ export class Editor {
   // ---- pointer events ----
 
   private onPointerDown(e: PointerEvent): void {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || this.locked) return;
     this.overlay.canvas.setPointerCapture(e.pointerId);
     const screen = this.toScreen(e);
     const geo = this.toGeo(e);
@@ -218,6 +221,7 @@ export class Editor {
 
   private onKeyDown(e: KeyboardEvent): void {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    if (this.locked) return;
     switch (e.key) {
       case 'Escape':
         this.draft = null;

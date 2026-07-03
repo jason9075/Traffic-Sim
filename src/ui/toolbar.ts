@@ -1,5 +1,5 @@
 /**
- * 上方工具列:工具切換按鈕。
+ * 上方工具列:編輯工具切換 + 模擬模式開關。
  */
 
 import type { Editor, Tool } from '../editor/editor';
@@ -14,7 +14,16 @@ const TOOLS: Array<{ tool: Tool; label: string; key: string }> = [
   { tool: 'spawn', label: '🚗 出入口', key: '7' },
 ];
 
-export function createToolbar(container: HTMLElement, editor: Editor): void {
+export interface Toolbar {
+  /** 進入/離開模擬模式時更新按鈕狀態 */
+  setSimMode(on: boolean): void;
+}
+
+export function createToolbar(
+  container: HTMLElement,
+  editor: Editor,
+  onSimToggle: () => void
+): Toolbar {
   const buttons = new Map<Tool, HTMLButtonElement>();
 
   for (const { tool, label, key } of TOOLS) {
@@ -26,9 +35,30 @@ export function createToolbar(container: HTMLElement, editor: Editor): void {
     buttons.set(tool, btn);
   }
 
+  const divider = document.createElement('div');
+  divider.className = 'divider';
+  container.appendChild(divider);
+
+  const simBtn = document.createElement('button');
+  simBtn.textContent = '▶ 模擬';
+  simBtn.style.color = '#4ade80';
+  simBtn.addEventListener('click', onSimToggle);
+  container.appendChild(simBtn);
+
   const sync = (tool: Tool): void => {
     for (const [t, btn] of buttons) btn.classList.toggle('selected', t === tool);
   };
   editor.onToolChange = sync;
   sync('pan');
+
+  return {
+    setSimMode(on: boolean): void {
+      simBtn.textContent = on ? '■ 停止模擬' : '▶ 模擬';
+      simBtn.style.color = on ? '#f87171' : '#4ade80';
+      for (const [tool, btn] of buttons) {
+        btn.disabled = on && tool !== 'pan';
+        btn.style.opacity = btn.disabled ? '0.35' : '';
+      }
+    },
+  };
 }
