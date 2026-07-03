@@ -1,4 +1,5 @@
-node_modules/
+# 不加斜線:node_modules 在本機是 symlink(noexec 掛載 workaround)
+node_modules
 dist/
 .direnv/
 result
