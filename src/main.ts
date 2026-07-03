@@ -6,6 +6,7 @@ import { Editor } from './editor/editor';
 import { Overlay } from './editor/overlay';
 import { renderScene } from './editor/render';
 import { buildNetwork, type Network } from './geometry/network';
+import { buildPedNetwork, type PedNetwork } from './geometry/pednet';
 import { createProjection, type LocalProjection } from './geometry/projection';
 import { createMap } from './map/map';
 import { SceneStore } from './model/store';
@@ -32,6 +33,7 @@ const panelEl = mustGet('panel');
 interface SimSession {
   worker: Worker;
   net: Network;
+  pedNet: PedNetwork;
   proj: LocalProjection;
   panel: SimPanel;
   frame: SimFrame | null;
@@ -60,9 +62,11 @@ function enterSim(): void {
   editor.select(null);
 
   const worker = new Worker(new URL('./sim.worker.ts', import.meta.url), { type: 'module' });
+  const pedNet = buildPedNetwork(scene, net);
   const init: MainToWorker = {
     type: 'init',
     net,
+    pedNet,
     timings: scene.lights.map((l) => [l.id, l.timing]),
     seed: 12345,
   };
@@ -74,7 +78,7 @@ function enterSim(): void {
     () => worker.postMessage({ type: 'reset' } satisfies MainToWorker)
   );
 
-  sim = { worker, net, proj: createProjection(net.origin), panel, frame: null };
+  sim = { worker, net, pedNet, proj: createProjection(net.origin), panel, frame: null };
   if (import.meta.env.DEV) {
     (window as unknown as Record<string, unknown>).__sim = sim;
   }
@@ -84,6 +88,8 @@ function enterSim(): void {
     sim.frame = {
       buf: new Float32Array(msg.buf),
       n: msg.n,
+      pedBuf: new Float32Array(msg.pedBuf),
+      nPeds: msg.nPeds,
       flows: msg.flows,
       signals: msg.signals,
     };

@@ -55,19 +55,24 @@ export function createSimPanel(
   statsDiv.style.cssText = 'font-size:12px;line-height:1.8;font-variant-numeric:tabular-nums';
   box.appendChild(statsDiv);
 
-  // 停等車輛 sparkline
-  const sparkLabel = document.createElement('div');
-  sparkLabel.className = 'hint';
-  sparkLabel.textContent = '停等車輛(近 5 分鐘)';
-  sparkLabel.style.marginTop = '6px';
-  box.appendChild(sparkLabel);
-  const spark = document.createElement('canvas');
-  spark.width = 236;
-  spark.height = 40;
-  spark.style.cssText = 'width:100%;height:40px;background:rgba(255,255,255,.05);border-radius:6px';
-  box.appendChild(spark);
+  // sparklines:停等車輛、平均延滯
+  const makeSpark = (label: string): HTMLCanvasElement => {
+    const l = document.createElement('div');
+    l.className = 'hint';
+    l.textContent = label;
+    l.style.marginTop = '6px';
+    box.appendChild(l);
+    const c = document.createElement('canvas');
+    c.width = 236;
+    c.height = 40;
+    c.style.cssText = 'width:100%;height:40px;background:rgba(255,255,255,.05);border-radius:6px';
+    box.appendChild(c);
+    return c;
+  };
+  const spark = makeSpark('停等車輛(近 5 分鐘)');
+  const sparkDelay = makeSpark('平均塞車延滯(近 5 分鐘)');
 
-  const history: Array<{ t: number; stopped: number }> = [];
+  const history: Array<{ t: number; stopped: number; delay: number }> = [];
 
   function fmtTime(s: number): string {
     const m = Math.floor(s / 60);
@@ -82,28 +87,35 @@ export function createSimPanel(
       `完成旅次 <b>${stats.completed}</b><br>` +
       `平均旅行時間 <b>${stats.avgTravel.toFixed(0)} 秒</b><br>` +
       `平均塞車延滯 <b style="color:#fbbf24">${stats.avgDelay.toFixed(0)} 秒</b><br>` +
-      (stats.queuedAtSpawn > 0 ? `入口等待 <b>${stats.queuedAtSpawn}</b> 輛<br>` : '');
+      (stats.queuedAtSpawn > 0 ? `入口等待 <b>${stats.queuedAtSpawn}</b> 輛<br>` : '') +
+      `行人 <b>${stats.activePeds}</b>(完成 <b>${stats.completedPeds}</b>)<br>` +
+      `行人平均等待 <b style="color:#fb923c">${stats.avgPedWait.toFixed(1)} 秒</b><br>`;
 
-    history.push({ t: stats.time, stopped: stats.stopped });
+    history.push({ t: stats.time, stopped: stats.stopped, delay: stats.avgDelay });
     const cutoff = stats.time - 300;
     while (history.length > 0 && history[0]!.t < cutoff) history.shift();
-    drawSpark();
+    drawSpark(spark, '#f87171', (h) => h.stopped);
+    drawSpark(sparkDelay, '#fbbf24', (h) => h.delay);
   }
 
-  function drawSpark(): void {
-    const ctx = spark.getContext('2d');
+  function drawSpark(
+    canvas: HTMLCanvasElement,
+    color: string,
+    pick: (h: { t: number; stopped: number; delay: number }) => number
+  ): void {
+    const ctx = canvas.getContext('2d');
     if (ctx === null || history.length < 2) return;
-    ctx.clearRect(0, 0, spark.width, spark.height);
-    const maxV = Math.max(4, ...history.map((h) => h.stopped));
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const maxV = Math.max(4, ...history.map(pick));
     const t0 = history[0]!.t;
     const t1 = history[history.length - 1]!.t;
     const span = Math.max(1, t1 - t0);
-    ctx.strokeStyle = '#f87171';
+    ctx.strokeStyle = color;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     history.forEach((h, i) => {
-      const x = ((h.t - t0) / span) * (spark.width - 4) + 2;
-      const y = spark.height - 3 - (h.stopped / maxV) * (spark.height - 8);
+      const x = ((h.t - t0) / span) * (canvas.width - 4) + 2;
+      const y = canvas.height - 3 - (pick(h) / maxV) * (canvas.height - 8);
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     });

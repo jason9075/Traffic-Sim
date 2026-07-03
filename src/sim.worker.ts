@@ -6,12 +6,14 @@ import { SimEngine } from './sim/engine';
 import type { MainToWorker, SnapshotMsg } from './sim/protocol';
 import type { SignalTiming } from './model/types';
 import type { Network } from './geometry/network';
+import type { PedNetwork } from './geometry/pednet';
 
 const DT = 0.1;
 const TICK_MS = 50;
 
 let engine: SimEngine | null = null;
 let net: Network | null = null;
+let pedNet: PedNetwork | null = null;
 let timings: Map<string, SignalTiming> = new Map();
 let seed = 1;
 let speedMult = 1;
@@ -22,16 +24,17 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
   switch (msg.type) {
     case 'init':
       net = msg.net;
+      pedNet = msg.pedNet;
       timings = new Map(msg.timings);
       seed = msg.seed;
-      engine = new SimEngine(net, timings, seed);
+      engine = new SimEngine(net, timings, seed, pedNet);
       accumulator = 0;
       break;
     case 'setSpeed':
       speedMult = msg.mult;
       break;
     case 'reset':
-      if (net !== null) engine = new SimEngine(net, timings, seed);
+      if (net !== null) engine = new SimEngine(net, timings, seed, pedNet);
       accumulator = 0;
       break;
   }
@@ -51,11 +54,15 @@ setInterval(() => {
   }
 
   const buf = engine.snapshotBuffer();
+  const pedBuf = engine.snapshotPedBuffer();
   const ab = buf.buffer as ArrayBuffer;
+  const pedAb = pedBuf.buffer as ArrayBuffer;
   const msg: SnapshotMsg = {
     type: 'snapshot',
     buf: ab,
     n: buf.length / 4,
+    pedBuf: pedAb,
+    nPeds: pedBuf.length / 3,
     stats: engine.stats(),
     flows: engine.edgeFlows(),
     signals: engine.signals().map((s) => ({
@@ -63,5 +70,5 @@ setInterval(() => {
       colors: [...s.colors.entries()],
     })),
   };
-  (self as unknown as Worker).postMessage(msg, [ab]);
+  (self as unknown as Worker).postMessage(msg, [ab, pedAb]);
 }, TICK_MS);

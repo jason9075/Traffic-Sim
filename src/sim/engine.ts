@@ -5,10 +5,11 @@
 
 import type { Network, NetEdge } from '../geometry/network';
 import { outgoingEdges } from '../geometry/network';
+import type { PedNetwork } from '../geometry/pednet';
 import { pointAt } from '../geometry/polyline';
 import type { SignalTiming } from '../model/types';
 import { expSample, mulberry32, type Rng } from './rng';
-import { shortestRoute } from './routing';
+import { shortestPath, shortestRoute } from './routing';
 import { buildSignalPlans, evalSignals, type SignalPlan, type SignalState } from './signals';
 
 /** IDM 參數(市區小客車) */
@@ -47,6 +48,25 @@ export interface SimStats {
   stopped: number;
   /** 等待進入路網的車輛 */
   queuedAtSpawn: number;
+  /** 行人:路上 / 完成 / 平均等待秒數 */
+  activePeds: number;
+  completedPeds: number;
+  avgPedWait: number;
+}
+
+/** 行人速度範圍 m/s(平均約 1.3) */
+const PED_SPEED_MIN = 1.0;
+const PED_SPEED_MAX = 1.6;
+
+export interface SimPed {
+  id: number;
+  route: number[];
+  routeIdx: number;
+  s: number;
+  speed: number;
+  spawnTime: number;
+  totalWait: number;
+  waiting: boolean;
 }
 
 export interface EdgeFlow {
@@ -63,28 +83,45 @@ interface PendingSpawn {
 
 export class SimEngine {
   readonly net: Network;
+  readonly pedNet: PedNetwork | null;
   private readonly plans: SignalPlan[];
   private readonly rng: Rng;
 
   time = 0;
   vehicles: SimVehicle[] = [];
+  peds: SimPed[] = [];
   private nextVehicleId = 1;
+  private nextPedId = 1;
   private completedCount = 0;
   private travelSum = 0;
   private delaySum = 0;
+  private completedPedCount = 0;
+  private pedWaitSum = 0;
 
   /** 各 spawn 的下次到達時間 */
   private nextArrival: Map<string, number> = new Map();
+  private nextPedArrival: Map<string, number> = new Map();
   private pending: PendingSpawn[] = [];
   private signalCache: SignalState[] = [];
 
-  constructor(net: Network, timings: ReadonlyMap<string, SignalTiming>, seed = 12345) {
+  constructor(
+    net: Network,
+    timings: ReadonlyMap<string, SignalTiming>,
+    seed = 12345,
+    pedNet: PedNetwork | null = null
+  ) {
     this.net = net;
+    this.pedNet = pedNet;
     this.plans = buildSignalPlans(net, timings);
     this.rng = mulberry32(seed);
     for (const sp of net.spawns) {
       if (sp.vehiclesPerHour > 0) {
         this.nextArrival.set(sp.spawnId, expSample(this.rng, sp.vehiclesPerHour / 3600));
+      }
+    }
+    if (pedNet !== null) {
+      for (const sp of pedNet.spawns) {
+        this.nextPedArrival.set(sp.spawnId, expSample(this.rng, sp.pedsPerHour / 3600));
       }
     }
   }
@@ -175,6 +212,99 @@ export class SimEngine {
         this.delaySum += Math.max(0, travel - v.freeflowTime);
       }
     }
+
+    this.stepPeds(dt);
+  }
+
+  /** 行人:走 → 到斑馬線口等紅燈 → 通過 */
+  private stepPeds(dt: number): void {
+    const pedNet = this.pedNet;
+    if (pedNet === null) return;
+    this.spawnPeds();
+
+    const donePeds: SimPed[] = [];
+    for (const ped of this.peds) {
+      let edge = pedNet.edges[ped.route[ped.routeIdx]!]!;
+
+      // 在斑馬線入口且有號誌管制 → 等所有被跨越的車道轉紅
+      if (edge.kind === 'cross' && ped.s < 0.05 && !this.crossingAllowed(edge.crossEdgeIds)) {
+        ped.totalWait += dt;
+        ped.waiting = true;
+        continue;
+      }
+      ped.waiting = false;
+      ped.s += ped.speed * dt;
+
+      while (ped.s >= edge.length) {
+        if (ped.routeIdx + 1 >= ped.route.length) {
+          donePeds.push(ped);
+          break;
+        }
+        ped.s -= edge.length;
+        ped.routeIdx++;
+        edge = pedNet.edges[ped.route[ped.routeIdx]!]!;
+        // 走到下一段是斑馬線且不能過 → 停在入口
+        if (edge.kind === 'cross' && !this.crossingAllowed(edge.crossEdgeIds)) {
+          ped.s = 0;
+          break;
+        }
+      }
+    }
+    if (donePeds.length > 0) {
+      const ids = new Set(donePeds.map((p) => p.id));
+      this.peds = this.peds.filter((p) => !ids.has(p.id));
+      for (const p of donePeds) {
+        this.completedPedCount++;
+        this.pedWaitSum += p.totalWait;
+      }
+    }
+  }
+
+  /** 斑馬線可通行:所有有號誌管制的被跨越車道都是紅燈 */
+  private crossingAllowed(crossEdgeIds: readonly number[]): boolean {
+    for (const edgeId of crossEdgeIds) {
+      for (const st of this.signalCache) {
+        const color = st.colors.get(edgeId);
+        if (color !== undefined && color !== 'red') return false;
+      }
+    }
+    return true;
+  }
+
+  private spawnPeds(): void {
+    const pedNet = this.pedNet;
+    if (pedNet === null) return;
+    for (const sp of pedNet.spawns) {
+      let next = this.nextPedArrival.get(sp.spawnId);
+      while (next !== undefined && next <= this.time) {
+        this.tryPlacePed(sp.nodeId, next);
+        next = next + expSample(this.rng, sp.pedsPerHour / 3600);
+      }
+      if (next !== undefined) this.nextPedArrival.set(sp.spawnId, next);
+    }
+  }
+
+  private tryPlacePed(fromNode: number, spawnTime: number): void {
+    const pedNet = this.pedNet!;
+    const destinations = pedNet.spawns.filter((s) => s.nodeId !== fromNode);
+    if (destinations.length === 0) return;
+    const dest = destinations[Math.floor(this.rng() * destinations.length)]!;
+    const route = shortestPath(
+      pedNet.edges.map((e) => ({ id: e.id, from: e.from, to: e.to, cost: e.length })),
+      fromNode,
+      dest.nodeId
+    );
+    if (route === null) return;
+    this.peds.push({
+      id: this.nextPedId++,
+      route: route.edgeIds,
+      routeIdx: 0,
+      s: 0,
+      speed: PED_SPEED_MIN + this.rng() * (PED_SPEED_MAX - PED_SPEED_MIN),
+      spawnTime,
+      totalWait: 0,
+      waiting: false,
+    });
   }
 
   stats(): SimStats {
@@ -186,7 +316,35 @@ export class SimEngine {
       avgDelay: this.completedCount === 0 ? 0 : this.delaySum / this.completedCount,
       stopped: this.vehicles.filter((v) => v.v < 0.5).length,
       queuedAtSpawn: this.pending.length,
+      activePeds: this.peds.length,
+      completedPeds: this.completedPedCount,
+      avgPedWait: this.avgPedWait(),
     };
+  }
+
+  /** 平均每位行人的累積等待(含仍在路上的行人) */
+  private avgPedWait(): number {
+    const total = this.completedPedCount + this.peds.length;
+    if (total === 0) return 0;
+    let sum = this.pedWaitSum;
+    for (const p of this.peds) sum += p.totalWait;
+    return sum / total;
+  }
+
+  /** 行人渲染快照:[x, y, waiting] × n */
+  snapshotPedBuffer(): Float32Array {
+    const pedNet = this.pedNet;
+    const buf = new Float32Array(this.peds.length * 3);
+    if (pedNet === null) return buf;
+    for (let i = 0; i < this.peds.length; i++) {
+      const ped = this.peds[i]!;
+      const edge = pedNet.edges[ped.route[ped.routeIdx]!]!;
+      const { point } = pointAt(edge.pts, ped.s);
+      buf[i * 3] = point.x;
+      buf[i * 3 + 1] = point.y;
+      buf[i * 3 + 2] = ped.waiting ? 1 : 0;
+    }
+    return buf;
   }
 
   /** 每條邊的流況(供 heatmap) */

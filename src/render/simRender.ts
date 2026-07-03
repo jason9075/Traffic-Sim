@@ -18,6 +18,8 @@ const VEHICLE_W_M = 1.8;
 export interface SimFrame {
   buf: Float32Array;
   n: number;
+  pedBuf: Float32Array;
+  nPeds: number;
   flows: EdgeFlow[];
   signals: SerializedSignal[];
 }
@@ -112,6 +114,21 @@ export function renderSim(
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  ctx.restore();
+
+  // 4. 行人(小圓點:行走藍、等待橘)
+  ctx.save();
+  const pedR = Math.max(2.5, 0.4 * pxPerMeter);
+  for (let i = 0; i < frame.nPeds; i++) {
+    const x = frame.pedBuf[i * 3]!;
+    const y = frame.pedBuf[i * 3 + 1]!;
+    const waiting = frame.pedBuf[i * 3 + 2]! > 0.5;
+    const s = localToScreen(map, proj, { x, y });
+    ctx.fillStyle = waiting ? '#fb923c' : '#38bdf8';
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, pedR, 0, Math.PI * 2);
+    ctx.fill();
   }
   ctx.restore();
 }
