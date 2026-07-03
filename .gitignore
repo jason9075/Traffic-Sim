@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.direnv/
+result
+
+# Env / secrets
+.env
+.env.*
+*.credentials.json
+
+# Editor / OS
+.DS_Store

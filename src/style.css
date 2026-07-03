@@ -1,0 +1,141 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  overflow: hidden;
+  font-family: 'Noto Sans TC', system-ui, sans-serif;
+}
+
+#map {
+  position: absolute;
+  inset: 0;
+}
+
+#overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none; /* editor 啟用工具時才切換為 auto */
+  z-index: 10;
+}
+
+#overlay.active {
+  pointer-events: auto;
+}
+
+#toolbar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  gap: 4px;
+  background: rgba(20, 20, 24, 0.88);
+  border-radius: 10px;
+  padding: 6px;
+  backdrop-filter: blur(6px);
+}
+
+#toolbar button {
+  border: none;
+  background: transparent;
+  color: #ddd;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+#toolbar button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+#toolbar button.selected {
+  background: #2563eb;
+  color: #fff;
+}
+
+#toolbar .divider {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.18);
+  margin: 4px 2px;
+}
+
+#panel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 20;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.panel-box {
+  background: rgba(20, 20, 24, 0.88);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: #ddd;
+  font-size: 13px;
+  backdrop-filter: blur(6px);
+}
+
+.panel-box h3 {
+  font-size: 12px;
+  font-weight: 600;
+  color: #9ca3af;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.panel-box input[type='text'] {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: #eee;
+  padding: 6px 8px;
+  font-size: 13px;
+  outline: none;
+}
+
+.panel-box input[type='text']:focus {
+  border-color: #2563eb;
+}
+
+.search-results {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.search-results button {
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: #cbd5e1;
+  padding: 5px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.search-results button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.hint {
+  color: #9ca3af;
+  font-size: 12px;
+  line-height: 1.6;
+}
