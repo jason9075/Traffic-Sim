@@ -137,24 +137,25 @@ export function buildNetwork(scene: Scene): Network {
       const toId = findOrCreateNode(part[part.length - 1]!);
       if (fromId === toId) continue;
 
-      // 台灣靠右:雙向道路各向右偏移半車道;單行道走中線
-      const offset = road.lanesBackward > 0 ? LANE_WIDTH_M / 2 : 0;
+      // 台灣靠右:各方向偏移到自己車道群組的中心;單行道走中線
+      const forwardOffset = road.lanesBackward > 0 ? (road.lanesForward * LANE_WIDTH_M) / 2 : 0;
       edges.push({
         id: edges.length,
         from: fromId,
         to: toId,
-        pts: offsetPolyline(part, offset),
+        pts: offsetPolyline(part, forwardOffset),
         length,
         speedLimit: speedMs,
         roadId: road.id,
       });
       if (road.lanesBackward > 0) {
+        const backwardOffset = (road.lanesBackward * LANE_WIDTH_M) / 2;
         const back = reversePolyline(part);
         edges.push({
           id: edges.length,
           from: toId,
           to: fromId,
-          pts: offsetPolyline(back, offset),
+          pts: offsetPolyline(back, backwardOffset),
           length,
           speedLimit: speedMs,
           roadId: road.id,

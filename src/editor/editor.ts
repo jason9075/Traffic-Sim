@@ -16,6 +16,7 @@ import {
 } from '../model/types';
 import type { Overlay } from './overlay';
 import { anchorsToSegments, metersPerPixel, project } from './render';
+import { findEndpointSnap } from './snapping';
 
 export type Tool = 'pan' | 'select' | 'road' | 'sidewalk' | 'light' | 'spawn';
 
@@ -111,12 +112,17 @@ export class Editor {
     this.notify();
   }
 
-  setTool(tool: Tool): void {
+  /**
+   * 切換工具。keepSelection 只給 finishDrawing() 完稿後自動切回移動模式時用,
+   * 讓剛畫完的路還能馬上在屬性面板調整(車道數等);使用者自己點「移動」按鈕/快捷鍵時仍會取消選取。
+   */
+  setTool(tool: Tool, opts: { keepSelection?: boolean } = {}): void {
     if (this.locked && tool !== 'pan') return;
     if (this.tool === tool) return;
     this.commitDraft();
     this.clearMultiSelect();
     this.tool = tool;
+    if (tool === 'pan' && !opts.keepSelection) this.select(null);
     this.overlay.setActive(tool !== 'pan');
     this.overlay.canvas.style.cursor = tool === 'select' || tool === 'pan' ? '' : 'crosshair';
     this.onToolChange?.(tool);
@@ -290,7 +296,7 @@ export class Editor {
 
   // ---- pen tool ----
 
-  private penDown(geo: GeoPoint, _screen: Vec2): void {
+  private penDown(geo: GeoPoint, screen: Vec2): void {
     if (this.draft === null) {
       this.draft = {
         kind: this.tool === 'road' ? 'road' : 'sidewalk',
@@ -299,7 +305,9 @@ export class Editor {
         dragging: false,
       };
     }
-    this.draft.anchors.push({ p: geo, hIn: null, hOut: null });
+    // 靠近既有道路/人行道端點時直接吸附,方便從已鋪的路線延伸連接
+    const snap = findEndpointSnap(this.map, this.store.get(), screen);
+    this.draft.anchors.push({ p: snap ?? geo, hIn: null, hOut: null });
     this.draft.dragging = true;
     this.notify();
   }
@@ -308,7 +316,7 @@ export class Editor {
   private finishDrawing(): void {
     const hadDraft = this.draft !== null;
     this.commitDraft();
-    if (hadDraft) this.setTool('pan');
+    if (hadDraft) this.setTool('pan', { keepSelection: true });
   }
 
   private commitDraft(): void {

@@ -246,6 +246,14 @@ function renderProps(
           store.update(() => { el.speedLimit = v; });
         })
       );
+      box.appendChild(
+        numberField('單向車道數', el.lanesForward, 1, 4, (v) => {
+          store.update(() => {
+            el.lanesForward = v;
+            el.lanesBackward = v;
+          });
+        })
+      );
       break;
     case 'light': {
       box.appendChild(

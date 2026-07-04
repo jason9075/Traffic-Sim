@@ -5,10 +5,10 @@
 import type maplibregl from 'maplibre-gl';
 
 import type { Vec2, CubicSegment } from '../geometry/bezier';
-import { evalCubic, evalCubicDeriv } from '../geometry/bezier';
 import { deriveCrosswalks } from '../geometry/crosswalks';
 import type { Anchor, GeoPoint, Scene } from '../model/types';
 import type { EditorView } from './editor';
+import { findEndpointSnap } from './snapping';
 
 /** 車道寬(公尺,台灣市區標準) */
 const LANE_WIDTH_M = 3.2;
@@ -25,6 +25,7 @@ const COLORS = {
   handle: '#93c5fd',
   selection: '#3b82f6',
   spawn: '#2563eb',
+  snapHint: '#22c55e',
 } as const;
 
 export function project(map: maplibregl.Map, g: GeoPoint): Vec2 {
@@ -126,7 +127,7 @@ export function renderScene(
     ctx.lineWidth = Math.max(1, 0.15 * pxPerMeter);
     ctx.setLineDash([]);
     ctx.stroke(path);
-    // 雙向:黃色中央線;單行道:方向箭頭
+    // 雙向道路中央線
     if (road.lanesBackward > 0) {
       ctx.strokeStyle = COLORS.centerLine;
       ctx.lineWidth = Math.max(1, 0.15 * pxPerMeter);
@@ -134,14 +135,6 @@ export function renderScene(
       ctx.stroke(path);
     }
     ctx.setLineDash([]);
-    // 行進方向箭頭(順向 = 繪製方向,靠右)
-    if (widthPx > 8) {
-      for (const s of segs) {
-        const at = evalCubic(s, 0.5);
-        const dir = evalCubicDeriv(s, 0.5);
-        drawArrow(ctx, at, dir, Math.min(widthPx * 0.35, 10), 'rgba(255,255,255,0.6)');
-      }
-    }
     ctx.restore();
   }
 
@@ -187,6 +180,16 @@ export function renderScene(
     drawDraft(ctx, map, view.draft);
   }
 
+  // 畫路/人行道時,靠近既有端點提示可延伸連接
+  if (
+    (view.tool === 'road' || view.tool === 'sidewalk') &&
+    view.cursor !== null &&
+    !(view.draft?.dragging ?? false)
+  ) {
+    const snap = findEndpointSnap(map, scene, view.cursor);
+    if (snap !== null) drawSnapHint(ctx, project(map, snap));
+  }
+
   // 選取元素的錨點與 handle
   if (view.selectedId !== null) {
     const el =
@@ -225,6 +228,20 @@ function drawDraft(
   drawAnchors(ctx, map, draft.anchors);
   // 觸控裝置沒有 Enter/雙擊手勢不可靠,改用 #mobile-draft-bar 的按鈕,提示文字只在滑鼠裝置顯示
   if (draft.cursor !== null && !isCoarsePointer()) drawFinishHint(ctx, draft.cursor);
+}
+
+function drawSnapHint(ctx: CanvasRenderingContext2D, p: Vec2): void {
+  ctx.save();
+  ctx.strokeStyle = COLORS.snapHint;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, 9, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = COLORS.snapHint;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 function isCoarsePointer(): boolean {
