@@ -162,7 +162,9 @@ export function renderScene(
 
   for (const light of scene.lights) {
     const p = project(map, light.at);
-    drawTrafficLight(ctx, p, light.id === view.selectedId);
+    const group = scene.lightGroups.find((g) => g.lightIds.includes(light.id));
+    const badge = group === undefined ? null : String(group.lightIds.indexOf(light.id) + 1);
+    drawTrafficLight(ctx, p, light.id === view.selectedId, view.multiSelect.includes(light.id), badge);
   }
 
   for (const sp of scene.spawns) {
@@ -237,6 +239,26 @@ function drawDraft(
   }
   ctx.restore();
   drawAnchors(ctx, map, draft.anchors);
+  if (draft.cursor !== null) drawFinishHint(ctx, draft.cursor);
+}
+
+function drawFinishHint(ctx: CanvasRenderingContext2D, cursor: Vec2): void {
+  const text = '雙擊或按 Enter 完成';
+  ctx.save();
+  ctx.font = '12px sans-serif';
+  const padX = 6;
+  const padY = 4;
+  const w = ctx.measureText(text).width + padX * 2;
+  const x = cursor.x + 14;
+  const y = cursor.y + 18;
+  ctx.fillStyle = 'rgba(20, 20, 24, 0.85)';
+  ctx.beginPath();
+  ctx.roundRect(x, y - 12 - padY, w, 12 + padY * 2, 4);
+  ctx.fill();
+  ctx.fillStyle = '#eee';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, x + padX, y);
+  ctx.restore();
 }
 
 export function drawAnchors(
@@ -272,10 +294,25 @@ export function drawAnchors(
   ctx.restore();
 }
 
-function drawTrafficLight(ctx: CanvasRenderingContext2D, p: Vec2, selected: boolean): void {
+function drawTrafficLight(
+  ctx: CanvasRenderingContext2D,
+  p: Vec2,
+  selected: boolean,
+  multiSelected: boolean,
+  groupBadge: string | null
+): void {
   ctx.save();
   const w = 12;
   const h = 28;
+  if (multiSelected) {
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, Math.max(w, h) / 2 + 6, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
   ctx.fillStyle = '#1f2937';
   ctx.strokeStyle = selected ? COLORS.selection : 'rgba(255,255,255,0.5)';
   ctx.lineWidth = selected ? 2.5 : 1.5;
@@ -290,5 +327,19 @@ function drawTrafficLight(ctx: CanvasRenderingContext2D, p: Vec2, selected: bool
     ctx.arc(p.x, p.y - h / 2 + 5.5 + i * 8.5, 3, 0, Math.PI * 2);
     ctx.fill();
   });
+  if (groupBadge !== null) {
+    const bx = p.x + w / 2 + 2;
+    const by = p.y - h / 2;
+    ctx.fillStyle = '#f59e0b';
+    ctx.beginPath();
+    ctx.arc(bx, by, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#1f2937';
+    ctx.font = 'bold 8px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(groupBadge, bx, by + 0.5);
+    ctx.textAlign = 'left';
+  }
   ctx.restore();
 }

@@ -15,6 +15,7 @@ let engine: SimEngine | null = null;
 let net: Network | null = null;
 let pedNet: PedNetwork | null = null;
 let timings: Map<string, SignalTiming> = new Map();
+let lightOffsets: Map<string, number> = new Map();
 let seed = 1;
 let speedMult = 1;
 let accumulator = 0;
@@ -26,15 +27,16 @@ self.onmessage = (ev: MessageEvent<MainToWorker>) => {
       net = msg.net;
       pedNet = msg.pedNet;
       timings = new Map(msg.timings);
+      lightOffsets = new Map(msg.lightOffsets);
       seed = msg.seed;
-      engine = new SimEngine(net, timings, seed, pedNet);
+      engine = new SimEngine(net, timings, seed, pedNet, lightOffsets);
       accumulator = 0;
       break;
     case 'setSpeed':
       speedMult = msg.mult;
       break;
     case 'reset':
-      if (net !== null) engine = new SimEngine(net, timings, seed, pedNet);
+      if (net !== null) engine = new SimEngine(net, timings, seed, pedNet, lightOffsets);
       accumulator = 0;
       break;
   }

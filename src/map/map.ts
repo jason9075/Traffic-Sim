@@ -38,6 +38,8 @@ export function createMap(container: HTMLElement): maplibregl.Map {
   // 畫路需要精確座標,關閉旋轉避免混淆
   map.dragRotate.disable();
   map.touchZoomRotate.disableRotation();
+  // 方向鍵改由 keyboardPan 統一處理(含 WASD),避免重複平移
+  map.keyboard.disable();
   return map;
 }
 

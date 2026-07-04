@@ -6,7 +6,8 @@ import type maplibregl from 'maplibre-gl';
 
 import type { Editor } from '../editor/editor';
 import { geocode } from '../map/map';
-import type { SceneStore } from '../model/store';
+import { newId, type SceneStore } from '../model/store';
+import type { LightGroup } from '../model/types';
 
 export function createPanel(
   container: HTMLElement,
@@ -19,6 +20,11 @@ export function createPanel(
   container.appendChild(searchBox);
   buildSearch(searchBox, map);
 
+  const groupBox = document.createElement('div');
+  groupBox.className = 'panel-box';
+  groupBox.style.display = 'none';
+  container.appendChild(groupBox);
+
   const propsBox = document.createElement('div');
   propsBox.className = 'panel-box';
   propsBox.style.display = 'none';
@@ -30,6 +36,39 @@ export function createPanel(
   buildSceneBox(sceneBox, store, editor);
 
   editor.onSelectionChange = (id) => renderProps(propsBox, store, editor, id);
+  editor.onMultiSelectChange = (ids) => renderGroupBuilder(groupBox, store, editor, ids);
+}
+
+function renderGroupBuilder(box: HTMLElement, store: SceneStore, editor: Editor, ids: string[]): void {
+  if (ids.length < 2) {
+    box.style.display = 'none';
+    return;
+  }
+  box.style.display = '';
+  box.innerHTML = '<h3>號誌群組</h3>';
+  const hint = document.createElement('p');
+  hint.className = 'hint';
+  hint.textContent = `已選取 ${ids.length} 個紅綠燈,建立群組後將依選取順序自動編號。`;
+  box.appendChild(hint);
+
+  const btn = smallButton('建立群組(此路口)');
+  btn.style.marginTop = '8px';
+  btn.addEventListener('click', () => {
+    store.update((s) => {
+      s.lightGroups.push({
+        id: newId('lgrp'),
+        label: nextGroupLabel(s.lightGroups),
+        lightIds: [...ids],
+        offsetSec: 0,
+      });
+    });
+    editor.clearMultiSelect();
+  });
+  box.appendChild(btn);
+}
+
+function nextGroupLabel(existing: LightGroup[]): string {
+  return `${String.fromCharCode(65 + (existing.length % 26))}小組`;
 }
 
 function buildSearch(box: HTMLElement, map: maplibregl.Map): void {
@@ -112,6 +151,7 @@ function buildSceneBox(box: HTMLElement, store: SceneStore, editor: Editor): voi
         s.crosswalks = [];
         s.lights = [];
         s.spawns = [];
+        s.lightGroups = [];
       });
     }
   });
@@ -144,13 +184,8 @@ function renderProps(
           store.update(() => { el.speedLimit = v; });
         })
       );
-      box.appendChild(
-        checkboxField('單行道', el.lanesBackward === 0, (checked) => {
-          store.update(() => { el.lanesBackward = checked ? 0 : 1; });
-        })
-      );
       break;
-    case 'light':
+    case 'light': {
       box.appendChild(
         numberField('綠燈 (秒)', el.timing.green, 5, 180, (v) => {
           store.update(() => { el.timing.green = v; });
@@ -166,7 +201,44 @@ function renderProps(
           store.update(() => { el.timing.allRed = v; });
         })
       );
+
+      const group = store.get().lightGroups.find((g) => g.lightIds.includes(id));
+      if (group !== undefined) {
+        const idx = group.lightIds.indexOf(id) + 1;
+        const header = document.createElement('p');
+        header.className = 'hint';
+        header.style.marginTop = '8px';
+        header.textContent = `所屬群組:第 ${idx}/${group.lightIds.length} 顆`;
+        box.appendChild(header);
+        box.appendChild(
+          textField('群組名稱', group.label, (v) => {
+            store.update(() => { group.label = v; });
+          })
+        );
+        box.appendChild(
+          numberField('與其他組時間差 (秒)', group.offsetSec, -300, 300, (v) => {
+            store.update(() => { group.offsetSec = v; });
+          })
+        );
+        const leave = smallButton('移出此群組');
+        leave.addEventListener('click', () => {
+          store.update((s) => {
+            s.lightGroups = s.lightGroups
+              .map((g) => (g.id === group.id ? { ...g, lightIds: g.lightIds.filter((lid) => lid !== id) } : g))
+              .filter((g) => g.lightIds.length > 1);
+          });
+          renderProps(box, store, editor, id);
+        });
+        box.appendChild(leave);
+      } else {
+        const hint = document.createElement('p');
+        hint.className = 'hint';
+        hint.style.marginTop = '8px';
+        hint.textContent = '按住 Ctrl 點選同路口的其他紅綠燈可建立群組。';
+        box.appendChild(hint);
+      }
       break;
+    }
     case 'spawn':
       box.appendChild(
         numberField('車流量 (輛/小時)', el.vehiclesPerHour, 0, 3000, (v) => {
@@ -231,16 +303,19 @@ function numberField(
   return wrap;
 }
 
-function checkboxField(label: string, checked: boolean, onChange: (v: boolean) => void): HTMLElement {
+function textField(label: string, value: string, onChange: (v: string) => void): HTMLElement {
   const wrap = document.createElement('label');
-  wrap.style.cssText = 'display:flex;align-items:center;gap:8px;margin:4px 0;cursor:pointer';
-  const input = document.createElement('input');
-  input.type = 'checkbox';
-  input.checked = checked;
-  input.addEventListener('change', () => onChange(input.checked));
+  wrap.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:8px;margin:4px 0';
   const span = document.createElement('span');
   span.textContent = label;
-  wrap.append(input, span);
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = value;
+  input.style.cssText =
+    'width:96px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);' +
+    'border-radius:6px;color:#eee;padding:4px 6px;font-size:13px';
+  input.addEventListener('change', () => onChange(input.value));
+  wrap.append(span, input);
   return wrap;
 }
 

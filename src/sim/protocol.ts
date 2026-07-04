@@ -14,6 +14,7 @@ export type MainToWorker =
       net: Network;
       pedNet: PedNetwork;
       timings: Array<[string, SignalTiming]>;
+      lightOffsets: Array<[string, number]>;
       seed: number;
     }
   | { type: 'setSpeed'; mult: number }

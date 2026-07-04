@@ -85,6 +85,18 @@ export interface SpawnPoint {
 export type SceneElement = Road | Sidewalk | Crosswalk | TrafficLight | SpawnPoint;
 export type ElementKind = SceneElement['kind'];
 
+/**
+ * 一個路口的號誌燈群組:同路口的多顆燈(各方向各一顆)歸為一組,
+ * 組內依 lightIds 順序自動編號;不同組(=不同路口)可設定 offsetSec 讓週期互相錯開。
+ */
+export interface LightGroup {
+  id: string;
+  label: string;
+  lightIds: string[];
+  /** 與全域模擬時間的相位差(秒) */
+  offsetSec: number;
+}
+
 /** 完整場景(可序列化) */
 export interface Scene {
   version: 1;
@@ -94,6 +106,7 @@ export interface Scene {
   crosswalks: Crosswalk[];
   lights: TrafficLight[];
   spawns: SpawnPoint[];
+  lightGroups: LightGroup[];
 }
 
 /** 台灣市區預設值 */
@@ -114,5 +127,6 @@ export function emptyScene(name = '未命名場景'): Scene {
     crosswalks: [],
     lights: [],
     spawns: [],
+    lightGroups: [],
   };
 }

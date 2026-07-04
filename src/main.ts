@@ -3,6 +3,7 @@
  */
 
 import { Editor } from './editor/editor';
+import { attachKeyboardPan } from './editor/keyboardPan';
 import { Overlay } from './editor/overlay';
 import { renderScene } from './editor/render';
 import { buildNetwork, type Network } from './geometry/network';
@@ -27,6 +28,7 @@ const store = new SceneStore();
 const overlay = new Overlay(mustGet('overlay') as HTMLCanvasElement, map);
 const editor = new Editor(map, overlay, store);
 const panelEl = mustGet('panel');
+attachKeyboardPan(map);
 
 // ---- 模擬模式 ----
 
@@ -63,11 +65,15 @@ function enterSim(): void {
 
   const worker = new Worker(new URL('./sim.worker.ts', import.meta.url), { type: 'module' });
   const pedNet = buildPedNetwork(scene, net);
+  const lightOffsets: Array<[string, number]> = scene.lightGroups.flatMap((g) =>
+    g.lightIds.map((lid) => [lid, g.offsetSec] as [string, number])
+  );
   const init: MainToWorker = {
     type: 'init',
     net,
     pedNet,
     timings: scene.lights.map((l) => [l.id, l.timing]),
+    lightOffsets,
     seed: 12345,
   };
   worker.postMessage(init);

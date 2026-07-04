@@ -14,6 +14,8 @@ export interface SignalPlan {
   groups: [number[], number[]];
   timing: SignalTiming;
   cycle: number;
+  /** 與其他路口號誌群組的時間差(秒),用於錯開週期 */
+  offsetSec: number;
 }
 
 export interface SignalState {
@@ -27,7 +29,8 @@ export interface SignalState {
 /** 為每個綁了紅綠燈的節點建立時相計畫 */
 export function buildSignalPlans(
   net: Network,
-  timings: ReadonlyMap<string, SignalTiming>
+  timings: ReadonlyMap<string, SignalTiming>,
+  lightOffsets: ReadonlyMap<string, number> = new Map()
 ): SignalPlan[] {
   const plans: SignalPlan[] = [];
   for (const node of net.nodes) {
@@ -76,7 +79,8 @@ export function buildSignalPlans(
     const groupB = rotated.slice(split2).map((x) => x.id);
 
     const cycle = 2 * (timing.green + timing.yellow + timing.allRed);
-    plans.push({ nodeId: node.id, groups: [groupA, groupB], timing, cycle });
+    const offsetSec = lightOffsets.get(node.lightId) ?? 0;
+    plans.push({ nodeId: node.id, groups: [groupA, groupB], timing, cycle, offsetSec });
   }
   return plans;
 }
@@ -86,7 +90,7 @@ export function evalSignals(plans: SignalPlan[], time: number): SignalState[] {
   return plans.map((plan) => {
     const { green, yellow, allRed } = plan.timing;
     const half = green + yellow + allRed;
-    const t = time % plan.cycle;
+    const t = (((time - plan.offsetSec) % plan.cycle) + plan.cycle) % plan.cycle;
     const inFirstHalf = t < half;
     const tt = inFirstHalf ? t : t - half;
 

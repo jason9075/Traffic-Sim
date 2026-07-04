@@ -33,6 +33,8 @@ export interface EditorView {
   cursor: Vec2 | null;
   draft: DraftPath | null;
   crosswalkStart: GeoPoint | null;
+  /** 按住 Ctrl 多選中的紅綠燈 id(用於組成號誌群組) */
+  multiSelect: string[];
 }
 
 type DragTarget =
@@ -57,11 +59,16 @@ export class Editor {
   private draft: DraftPath | null = null;
   private crosswalkStart: GeoPoint | null = null;
   private drag: DragTarget | null = null;
+  /** 中鍵拖曳平移時,上一個畫面座標(不受目前工具影響) */
+  private middlePan: Vec2 | null = null;
+  /** Ctrl+click 多選中的紅綠燈 id,插入順序 = 組內編號 */
+  private multiSelect = new Set<string>();
 
   /** 視圖或選取變更時通知(重繪、更新面板) */
   onViewChange: (() => void) | null = null;
   onSelectionChange: ((id: string | null) => void) | null = null;
   onToolChange: ((tool: Tool) => void) | null = null;
+  onMultiSelectChange: ((ids: string[]) => void) | null = null;
 
   constructor(map: maplibregl.Map, overlay: Overlay, store: SceneStore) {
     this.map = map;
@@ -83,7 +90,16 @@ export class Editor {
       cursor: this.cursor,
       draft: this.draft,
       crosswalkStart: this.crosswalkStart,
+      multiSelect: [...this.multiSelect],
     };
+  }
+
+  /** 清空紅綠燈多選(建立群組後或放棄時呼叫) */
+  clearMultiSelect(): void {
+    if (this.multiSelect.size === 0) return;
+    this.multiSelect.clear();
+    this.onMultiSelectChange?.([]);
+    this.notify();
   }
 
   setTool(tool: Tool): void {
@@ -91,6 +107,7 @@ export class Editor {
     if (this.tool === tool) return;
     this.commitDraft();
     this.crosswalkStart = null;
+    this.clearMultiSelect();
     this.tool = tool;
     this.overlay.setActive(tool !== 'pan');
     this.overlay.canvas.style.cursor = tool === 'select' || tool === 'pan' ? '' : 'crosshair';
@@ -102,6 +119,17 @@ export class Editor {
     if (this.selectedId === id) return;
     this.selectedId = id;
     this.onSelectionChange?.(id);
+    this.notify();
+  }
+
+  private toggleMultiSelect(id: string): void {
+    if (this.multiSelect.has(id)) this.multiSelect.delete(id);
+    else this.multiSelect.add(id);
+    if (this.selectedId !== null) {
+      this.selectedId = null;
+      this.onSelectionChange?.(null);
+    }
+    this.onMultiSelectChange?.([...this.multiSelect]);
     this.notify();
   }
 
@@ -123,6 +151,13 @@ export class Editor {
   // ---- pointer events ----
 
   private onPointerDown(e: PointerEvent): void {
+    if (e.button === 1) {
+      // 中鍵拖曳平移:任何工具下都可用,不影響原有工具邏輯
+      e.preventDefault();
+      this.overlay.canvas.setPointerCapture(e.pointerId);
+      this.middlePan = this.toScreen(e);
+      return;
+    }
     if (e.button !== 0 || this.locked) return;
     this.overlay.canvas.setPointerCapture(e.pointerId);
     const screen = this.toScreen(e);
@@ -134,7 +169,7 @@ export class Editor {
         this.penDown(geo, screen);
         break;
       case 'select':
-        this.selectDown(screen);
+        this.selectDown(screen, e.ctrlKey || e.metaKey);
         break;
       case 'crosswalk':
         if (this.crosswalkStart === null) {
@@ -177,6 +212,12 @@ export class Editor {
   }
 
   private onPointerMove(e: PointerEvent): void {
+    if (this.middlePan !== null) {
+      const cur = this.toScreen(e);
+      this.map.panBy([this.middlePan.x - cur.x, this.middlePan.y - cur.y], { animate: false });
+      this.middlePan = cur;
+      return;
+    }
     this.cursor = this.toScreen(e);
     const geo = this.toGeo(e);
 
@@ -203,6 +244,10 @@ export class Editor {
 
   private onPointerUp(e: PointerEvent): void {
     this.overlay.canvas.releasePointerCapture(e.pointerId);
+    if (this.middlePan !== null) {
+      this.middlePan = null;
+      return;
+    }
     if (this.draft !== null) {
       this.draft.dragging = false;
       this.notify();
@@ -226,6 +271,7 @@ export class Editor {
       case 'Escape':
         this.draft = null;
         this.crosswalkStart = null;
+        this.clearMultiSelect();
         this.select(null);
         this.notify();
         break;
@@ -294,7 +340,20 @@ export class Editor {
 
   // ---- select tool ----
 
-  private selectDown(screen: Vec2): void {
+  private selectDown(screen: Vec2, ctrl: boolean): void {
+    if (ctrl) {
+      // 按住 Ctrl:只用於多選紅綠燈組成號誌群組,不影響其他元素的一般選取
+      const scene = this.store.get();
+      for (const light of scene.lights) {
+        if (dist(project(this.map, light.at), screen) < POINT_HIT_PX) {
+          this.toggleMultiSelect(light.id);
+          return;
+        }
+      }
+      return;
+    }
+    this.clearMultiSelect();
+
     // 1. 已選取路徑的錨點 / handle
     const selectedPath = this.getSelectedPath();
     if (selectedPath !== null) {

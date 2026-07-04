@@ -57,6 +57,9 @@ export class SceneStore {
       s.crosswalks = s.crosswalks.filter((e) => e.id !== id);
       s.lights = s.lights.filter((e) => e.id !== id);
       s.spawns = s.spawns.filter((e) => e.id !== id);
+      s.lightGroups = s.lightGroups
+        .map((g) => ({ ...g, lightIds: g.lightIds.filter((lid) => lid !== id) }))
+        .filter((g) => g.lightIds.length > 1);
     });
   }
 
@@ -69,7 +72,7 @@ export class SceneStore {
     if (!isScene(parsed)) {
       throw new Error('無效的場景檔:格式不符');
     }
-    this.replace(parsed);
+    this.replace(normalizeScene(parsed));
   }
 
   private notify(): void {
@@ -94,7 +97,7 @@ function loadFromStorage(): Scene | null {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw === null) return null;
     const parsed: unknown = JSON.parse(raw);
-    return isScene(parsed) ? parsed : null;
+    return isScene(parsed) ? normalizeScene(parsed) : null;
   } catch {
     return null;
   }
@@ -111,6 +114,11 @@ function isScene(v: unknown): v is Scene {
     Array.isArray(s.lights) &&
     Array.isArray(s.spawns)
   );
+}
+
+/** 補上舊存檔沒有的欄位(目前:lightGroups) */
+function normalizeScene(s: Scene): Scene {
+  return { ...s, lightGroups: Array.isArray(s.lightGroups) ? s.lightGroups : [] };
 }
 
 /** 產生元素 id */

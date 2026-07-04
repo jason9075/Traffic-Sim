@@ -108,11 +108,12 @@ export class SimEngine {
     net: Network,
     timings: ReadonlyMap<string, SignalTiming>,
     seed = 12345,
-    pedNet: PedNetwork | null = null
+    pedNet: PedNetwork | null = null,
+    lightOffsets: ReadonlyMap<string, number> = new Map()
   ) {
     this.net = net;
     this.pedNet = pedNet;
-    this.plans = buildSignalPlans(net, timings);
+    this.plans = buildSignalPlans(net, timings, lightOffsets);
     this.rng = mulberry32(seed);
     for (const sp of net.spawns) {
       if (sp.vehiclesPerHour > 0) {
