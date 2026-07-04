@@ -68,6 +68,25 @@ body,
   margin: 4px 2px;
 }
 
+/* 觸控裝置:工具列只留圖示,按鈕縮小,並允許橫向捲動避免超出螢幕被裁切 */
+@media (pointer: coarse) {
+  #toolbar {
+    max-width: calc(100vw - 24px);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #toolbar button {
+    padding: 8px;
+    min-width: 40px;
+    min-height: 40px;
+  }
+
+  #toolbar .tool-label {
+    display: none;
+  }
+}
+
 #panel {
   position: absolute;
   top: 12px;
@@ -77,6 +96,63 @@ body,
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* 觸控裝置:面板預設收合,改由右側圖示 dock 開關單一面板,避免長期遮住地圖。
+   工具列在窄螢幕上會橫向撐到接近全寬,面板/dock 需退到工具列下方,避免疊在一起擋住按鈕。 */
+@media (pointer: coarse) {
+  #panel {
+    top: 64px;
+    right: 56px;
+    width: min(260px, calc(100vw - 76px));
+  }
+
+  #panel .panel-box[data-panel] {
+    display: none;
+    max-height: calc(100vh - 84px);
+    overflow-y: auto;
+  }
+
+  #panel .panel-box[data-panel].open {
+    display: block;
+  }
+}
+
+#panel-dock {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  #panel-dock {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    position: absolute;
+    top: 64px;
+    right: 12px;
+    z-index: 21;
+  }
+}
+
+.dock-icon {
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(20, 20, 24, 0.88);
+  color: #ddd;
+  font-size: 17px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+
+.dock-icon.active {
+  background: #2563eb;
+  color: #fff;
 }
 
 .panel-box {

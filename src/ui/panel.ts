@@ -9,6 +9,9 @@ import { geocode } from '../map/map';
 import { newId, type SceneStore } from '../model/store';
 import type { LightGroup } from '../model/types';
 
+/** 手機版(pointer: coarse)右側收合圖示對應的面板 key */
+type DockPanel = 'search' | 'props' | 'scene';
+
 export function createPanel(
   container: HTMLElement,
   map: maplibregl.Map,
@@ -17,8 +20,8 @@ export function createPanel(
 ): void {
   const searchBox = document.createElement('div');
   searchBox.className = 'panel-box';
+  searchBox.dataset.panel = 'search';
   container.appendChild(searchBox);
-  buildSearch(searchBox, map);
 
   const groupBox = document.createElement('div');
   groupBox.className = 'panel-box';
@@ -27,16 +30,74 @@ export function createPanel(
 
   const propsBox = document.createElement('div');
   propsBox.className = 'panel-box';
+  propsBox.dataset.panel = 'props';
   propsBox.style.display = 'none';
   container.appendChild(propsBox);
 
   const sceneBox = document.createElement('div');
   sceneBox.className = 'panel-box';
+  sceneBox.dataset.panel = 'scene';
   container.appendChild(sceneBox);
   buildSceneBox(sceneBox, store, editor);
 
-  editor.onSelectionChange = (id) => renderProps(propsBox, store, editor, id);
+  // 手機版:右邊界圖示 dock,點擊展開對應面板(同時只開一個),避免面板一直遮住地圖
+  const dock = document.createElement('div');
+  dock.id = 'panel-dock';
+  container.parentElement?.appendChild(dock);
+
+  const boxes: Record<DockPanel, HTMLElement> = { search: searchBox, props: propsBox, scene: sceneBox };
+  const searchIcon = dockIcon('🔍', '地點搜尋');
+  const propsIcon = dockIcon('✎', '屬性');
+  const sceneIcon = dockIcon('🗂', '場景');
+  propsIcon.style.display = 'none'; // 只有選取元素時才出現
+  dock.append(searchIcon, propsIcon, sceneIcon);
+  const icons: Record<DockPanel, HTMLButtonElement> = { search: searchIcon, props: propsIcon, scene: sceneIcon };
+
+  function closeAllPanels(): void {
+    for (const key of Object.keys(boxes) as DockPanel[]) {
+      boxes[key].classList.remove('open');
+      icons[key].classList.remove('active');
+    }
+  }
+  function openPanel(name: DockPanel): void {
+    closeAllPanels();
+    boxes[name].classList.add('open');
+    icons[name].classList.add('active');
+  }
+  function togglePanel(name: DockPanel): void {
+    if (boxes[name].classList.contains('open')) closeAllPanels();
+    else openPanel(name);
+  }
+
+  searchIcon.addEventListener('click', () => togglePanel('search'));
+  sceneIcon.addEventListener('click', () => togglePanel('scene'));
+  propsIcon.addEventListener('click', () => {
+    if (boxes.props.classList.contains('open')) {
+      closeAllPanels();
+      return;
+    }
+    renderProps(propsBox, store, editor, editor.getView().selectedId);
+    openPanel('props');
+  });
+
+  buildSearch(searchBox, map, closeAllPanels);
+
+  editor.onSelectionChange = (id) => {
+    renderProps(propsBox, store, editor, id);
+    propsIcon.style.display = id !== null ? '' : 'none';
+    if (id !== null) openPanel('props');
+    else if (boxes.props.classList.contains('open')) closeAllPanels();
+  };
   editor.onMultiSelectChange = (ids) => renderGroupBuilder(groupBox, store, editor, ids);
+}
+
+function dockIcon(icon: string, title: string): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.className = 'dock-icon';
+  btn.textContent = icon;
+  btn.title = title;
+  btn.setAttribute('aria-label', title);
+  return btn;
 }
 
 function renderGroupBuilder(box: HTMLElement, store: SceneStore, editor: Editor, ids: string[]): void {
@@ -71,7 +132,7 @@ function nextGroupLabel(existing: LightGroup[]): string {
   return `${String.fromCharCode(65 + (existing.length % 26))}小組`;
 }
 
-function buildSearch(box: HTMLElement, map: maplibregl.Map): void {
+function buildSearch(box: HTMLElement, map: maplibregl.Map, onPicked: () => void): void {
   box.innerHTML = '<h3>地點搜尋</h3>';
   const input = document.createElement('input');
   input.type = 'text';
@@ -91,6 +152,7 @@ function buildSearch(box: HTMLElement, map: maplibregl.Map): void {
         btn.textContent = hit.name;
         btn.addEventListener('click', () => {
           map.flyTo({ center: [hit.lng, hit.lat], zoom: 17 });
+          onPicked(); // 手機版:選好地點後收合搜尋面板,避免一直遮住地圖
         });
         results.appendChild(btn);
       }
