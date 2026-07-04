@@ -35,20 +35,20 @@ function sidewalk(id: string, from: [number, number], to: [number, number]): Sid
 }
 
 /**
- * 東西向道路 + 南北兩側人行道 + x=0 處一條斑馬線跨越道路 + 號誌。
+ * 東西向道路 + 南北兩側人行道 + x=12 處一條人行道垂直穿過道路(自動產生斑馬線)+ 號誌。
  * 行人從西南角走到西北角,必須通過斑馬線。
  */
 function pedScene(): { scene: Scene; timing: SignalTiming } {
   const scene = emptyScene('ped');
   scene.roads = [
     road('ew', [-200, 0], [200, 0]),
-    road('ns', [0, -100], [0, 100]), // 讓路口有號誌意義
+    road('ns', [0, -8], [0, 8]), // 讓路口有號誌意義;刻意比人行道短,避免又穿過南北兩側人行道
   ];
   scene.sidewalks = [
     sidewalk('south', [-200, -10], [200, -10]),
     sidewalk('north', [-200, 10], [200, 10]),
+    sidewalk('cross', [12, -10], [12, 10]), // 垂直穿過 ew 馬路 → 自動生成斑馬線
   ];
-  scene.crosswalks = [{ id: 'cw1', kind: 'crosswalk', a: geo(12, -10), b: geo(12, 10) }];
   const timing: SignalTiming = { green: 30, yellow: 3, allRed: 2 };
   scene.lights = [{ id: 'L1', kind: 'light', at: geo(0, 0), timing }];
   scene.spawns = [

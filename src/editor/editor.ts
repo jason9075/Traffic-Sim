@@ -17,7 +17,7 @@ import {
 import type { Overlay } from './overlay';
 import { anchorsToSegments, metersPerPixel, project } from './render';
 
-export type Tool = 'pan' | 'select' | 'road' | 'sidewalk' | 'crosswalk' | 'light' | 'spawn';
+export type Tool = 'pan' | 'select' | 'road' | 'sidewalk' | 'light' | 'spawn';
 
 export interface DraftPath {
   kind: 'road' | 'sidewalk';
@@ -32,7 +32,6 @@ export interface EditorView {
   selectedId: string | null;
   cursor: Vec2 | null;
   draft: DraftPath | null;
-  crosswalkStart: GeoPoint | null;
   /** 按住 Ctrl 多選中的紅綠燈 id(用於組成號誌群組) */
   multiSelect: string[];
 }
@@ -40,7 +39,7 @@ export interface EditorView {
 type DragTarget =
   | { type: 'anchor'; id: string; index: number }
   | { type: 'handle'; id: string; index: number; side: 'hIn' | 'hOut' }
-  | { type: 'point'; id: string; field: 'at' | 'a' | 'b' };
+  | { type: 'point'; id: string; field: 'at' };
 
 const ANCHOR_HIT_PX = 8;
 const HANDLE_HIT_PX = 7;
@@ -57,7 +56,6 @@ export class Editor {
   private selectedId: string | null = null;
   private cursor: Vec2 | null = null;
   private draft: DraftPath | null = null;
-  private crosswalkStart: GeoPoint | null = null;
   private drag: DragTarget | null = null;
   /** 中鍵拖曳平移時,上一個畫面座標(不受目前工具影響) */
   private middlePan: Vec2 | null = null;
@@ -89,14 +87,13 @@ export class Editor {
       selectedId: this.selectedId,
       cursor: this.cursor,
       draft: this.draft,
-      crosswalkStart: this.crosswalkStart,
       multiSelect: [...this.multiSelect],
     };
   }
 
   /** 手機無鍵盤/雙擊不便,提供給底部「確定」按鈕呼叫,結束目前繪製路徑 */
   finishDraft(): void {
-    this.commitDraft();
+    this.finishDrawing();
   }
 
   /** 提供給底部「取消」按鈕呼叫,捨棄目前繪製路徑 */
@@ -118,7 +115,6 @@ export class Editor {
     if (this.locked && tool !== 'pan') return;
     if (this.tool === tool) return;
     this.commitDraft();
-    this.crosswalkStart = null;
     this.clearMultiSelect();
     this.tool = tool;
     this.overlay.setActive(tool !== 'pan');
@@ -178,23 +174,12 @@ export class Editor {
     switch (this.tool) {
       case 'road':
       case 'sidewalk':
+        // 觸控裝置上避免瀏覽器把拖曳當成手勢(捲動/縮放),搶走拉貝茲曲線用的 pointermove
+        e.preventDefault();
         this.penDown(geo, screen);
         break;
       case 'select':
         this.selectDown(screen, e.ctrlKey || e.metaKey);
-        break;
-      case 'crosswalk':
-        if (this.crosswalkStart === null) {
-          this.crosswalkStart = geo;
-        } else {
-          const id = newId('cw');
-          this.store.update((s) => {
-            s.crosswalks.push({ id, kind: 'crosswalk', a: this.crosswalkStart!, b: geo });
-          });
-          this.crosswalkStart = null;
-          this.select(id);
-        }
-        this.notify();
         break;
       case 'light': {
         const id = newId('tl');
@@ -250,8 +235,6 @@ export class Editor {
       this.applyDrag(geo, e.altKey);
       return;
     }
-
-    if (this.crosswalkStart !== null) this.notify();
   }
 
   private onPointerUp(e: PointerEvent): void {
@@ -272,7 +255,7 @@ export class Editor {
     if (this.draft !== null) {
       // 雙擊的第二下已多加一個重複錨點,移除後結束
       if (this.draft.anchors.length > 1) this.draft.anchors.pop();
-      this.commitDraft();
+      this.finishDrawing();
     }
   }
 
@@ -282,13 +265,12 @@ export class Editor {
     switch (e.key) {
       case 'Escape':
         this.draft = null;
-        this.crosswalkStart = null;
         this.clearMultiSelect();
         this.select(null);
         this.notify();
         break;
       case 'Enter':
-        this.commitDraft();
+        this.finishDrawing();
         break;
       case 'Delete':
       case 'Backspace':
@@ -301,9 +283,8 @@ export class Editor {
       case '2': this.setTool('select'); break;
       case '3': this.setTool('road'); break;
       case '4': this.setTool('sidewalk'); break;
-      case '5': this.setTool('crosswalk'); break;
-      case '6': this.setTool('light'); break;
-      case '7': this.setTool('spawn'); break;
+      case '5': this.setTool('light'); break;
+      case '6': this.setTool('spawn'); break;
     }
   }
 
@@ -321,6 +302,13 @@ export class Editor {
     this.draft.anchors.push({ p: geo, hIn: null, hOut: null });
     this.draft.dragging = true;
     this.notify();
+  }
+
+  /** 使用者主動完成繪製(雙擊/Enter/手機確定鈕共用):送出路徑後自動切回移動模式 */
+  private finishDrawing(): void {
+    const hadDraft = this.draft !== null;
+    this.commitDraft();
+    if (hadDraft) this.setTool('pan');
   }
 
   private commitDraft(): void {
@@ -396,25 +384,7 @@ export class Editor {
       }
     }
 
-    // 3. 斑馬線端點(已選取時)與本體
-    for (const cw of scene.crosswalks) {
-      if (cw.id === this.selectedId) {
-        if (dist(project(this.map, cw.a), screen) < POINT_HIT_PX) {
-          this.drag = { type: 'point', id: cw.id, field: 'a' };
-          return;
-        }
-        if (dist(project(this.map, cw.b), screen) < POINT_HIT_PX) {
-          this.drag = { type: 'point', id: cw.id, field: 'b' };
-          return;
-        }
-      }
-      if (distToSegment(screen, project(this.map, cw.a), project(this.map, cw.b)) < 8) {
-        this.select(cw.id);
-        return;
-      }
-    }
-
-    // 4. 道路 / 人行道本體
+    // 3. 道路 / 人行道本體
     const mpp = metersPerPixel(this.map);
     for (const road of scene.roads) {
       const widthPx =
@@ -455,10 +425,8 @@ export class Editor {
       if (drag.type === 'point') {
         const el = this.store.findById(drag.id);
         if (el === undefined) return;
-        if (drag.field === 'at' && (el.kind === 'light' || el.kind === 'spawn')) {
+        if (el.kind === 'light' || el.kind === 'spawn') {
           el.at = geo;
-        } else if (el.kind === 'crosswalk' && (drag.field === 'a' || drag.field === 'b')) {
-          el[drag.field] = geo;
         }
         return;
       }
@@ -487,13 +455,4 @@ export class Editor {
 
 function mirror(center: GeoPoint, h: GeoPoint): GeoPoint {
   return { lng: 2 * center.lng - h.lng, lat: 2 * center.lat - h.lat };
-}
-
-function distToSegment(p: Vec2, a: Vec2, b: Vec2): number {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const len2 = dx * dx + dy * dy;
-  if (len2 === 0) return dist(p, a);
-  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
-  return dist(p, { x: a.x + t * dx, y: a.y + t * dy });
 }

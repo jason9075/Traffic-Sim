@@ -9,9 +9,8 @@ const TOOLS: Array<{ tool: Tool; icon: string; text: string; key: string }> = [
   { tool: 'select', icon: '▢', text: '選取', key: '2' },
   { tool: 'road', icon: '🛣', text: '馬路', key: '3' },
   { tool: 'sidewalk', icon: '🚶', text: '人行道', key: '4' },
-  { tool: 'crosswalk', icon: '🦓', text: '斑馬線', key: '5' },
-  { tool: 'light', icon: '🚦', text: '紅綠燈', key: '6' },
-  { tool: 'spawn', icon: '🚗', text: '出入口', key: '7' },
+  { tool: 'light', icon: '🚦', text: '紅綠燈', key: '5' },
+  { tool: 'spawn', icon: '🚗', text: '出入口', key: '6' },
 ];
 
 export interface Toolbar {

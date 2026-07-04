@@ -6,6 +6,7 @@ import type maplibregl from 'maplibre-gl';
 
 import type { Vec2, CubicSegment } from '../geometry/bezier';
 import { evalCubic, evalCubicDeriv } from '../geometry/bezier';
+import { deriveCrosswalks } from '../geometry/crosswalks';
 import type { Anchor, GeoPoint, Scene } from '../model/types';
 import type { EditorView } from './editor';
 
@@ -144,11 +145,11 @@ export function renderScene(
     ctx.restore();
   }
 
-  for (const cw of scene.crosswalks) {
+  for (const { crosswalk: cw } of deriveCrosswalks(scene)) {
     const a = project(map, cw.a);
     const b = project(map, cw.b);
     ctx.save();
-    ctx.strokeStyle = cw.id === view.selectedId ? COLORS.selection : COLORS.crosswalk;
+    ctx.strokeStyle = COLORS.crosswalk;
     ctx.globalAlpha = 0.9;
     ctx.lineWidth = Math.max(4, 3 * pxPerMeter);
     // 沿行走方向的 dash → 視覺上垂直行走方向的枕木紋
@@ -184,23 +185,6 @@ export function renderScene(
   // 繪製中的草稿路徑
   if (view.draft !== null) {
     drawDraft(ctx, map, view.draft);
-  }
-  if (view.crosswalkStart !== null) {
-    const p = project(map, view.crosswalkStart);
-    ctx.save();
-    ctx.fillStyle = COLORS.draft;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-    ctx.fill();
-    if (view.cursor !== null) {
-      ctx.strokeStyle = COLORS.draft;
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
-      ctx.lineTo(view.cursor.x, view.cursor.y);
-      ctx.stroke();
-    }
-    ctx.restore();
   }
 
   // 選取元素的錨點與 handle

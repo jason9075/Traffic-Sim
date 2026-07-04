@@ -45,7 +45,10 @@ export interface Sidewalk {
   path: BezierPath;
 }
 
-/** 斑馬線:一條橫跨馬路的線段,連接兩側人行道 */
+/**
+ * 斑馬線:一條橫跨馬路的線段,連接兩側人行道。
+ * 由 geometry/crosswalks.ts 依人行道與馬路的幾何交叉點自動推導,不手動鋪設、不存進 Scene。
+ */
 export interface Crosswalk {
   id: string;
   kind: 'crosswalk';
@@ -82,7 +85,7 @@ export interface SpawnPoint {
   pedsPerHour: number;
 }
 
-export type SceneElement = Road | Sidewalk | Crosswalk | TrafficLight | SpawnPoint;
+export type SceneElement = Road | Sidewalk | TrafficLight | SpawnPoint;
 export type ElementKind = SceneElement['kind'];
 
 /**
@@ -103,7 +106,6 @@ export interface Scene {
   name: string;
   roads: Road[];
   sidewalks: Sidewalk[];
-  crosswalks: Crosswalk[];
   lights: TrafficLight[];
   spawns: SpawnPoint[];
   lightGroups: LightGroup[];
@@ -124,7 +126,6 @@ export function emptyScene(name = '未命名場景'): Scene {
     name,
     roads: [],
     sidewalks: [],
-    crosswalks: [],
     lights: [],
     spawns: [],
     lightGroups: [],

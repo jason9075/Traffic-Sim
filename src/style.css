@@ -21,6 +21,8 @@ body,
   position: absolute;
   inset: 0;
   pointer-events: none; /* editor 啟用工具時才切換為 auto */
+  /* 觸控裝置預設會把拖曳當成捲動/縮放手勢,關掉才能讓 pointermove 正確拉出貝茲曲線控制點 */
+  touch-action: none;
   z-index: 10;
 }
 

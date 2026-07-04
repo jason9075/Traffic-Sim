@@ -169,7 +169,8 @@ function buildSceneBox(box: HTMLElement, store: SceneStore, editor: Editor): voi
   const hint = document.createElement('p');
   hint.className = 'hint';
   hint.textContent =
-    '快捷鍵 1–7 切換工具。畫路:點擊放錨點、按住拖曳拉出弧度,雙擊或 Enter 結束,Esc 取消。Delete 刪除選取。';
+    '快捷鍵 1–6 切換工具。畫路/人行道:點擊放錨點、按住拖曳拉出弧度,雙擊或 Enter 完成後自動切回移動模式,Esc 取消。' +
+    '人行道穿過馬路的路口會自動生成斑馬線。Delete 刪除選取。';
   box.appendChild(hint);
 
   const row = document.createElement('div');
@@ -210,7 +211,6 @@ function buildSceneBox(box: HTMLElement, store: SceneStore, editor: Editor): voi
       store.update((s) => {
         s.roads = [];
         s.sidewalks = [];
-        s.crosswalks = [];
         s.lights = [];
         s.spawns = [];
         s.lightGroups = [];
@@ -314,7 +314,6 @@ function renderProps(
       );
       break;
     case 'sidewalk':
-    case 'crosswalk':
       break;
   }
 
@@ -331,7 +330,6 @@ function kindLabel(kind: string): string {
   const labels: Record<string, string> = {
     road: '馬路',
     sidewalk: '人行道',
-    crosswalk: '斑馬線',
     light: '紅綠燈',
     spawn: '出入口',
   };

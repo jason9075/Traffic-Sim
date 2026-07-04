@@ -1,11 +1,12 @@
 /**
  * 行人路網:人行道 + 斑馬線 → undirected graph(以成對有向邊表示)。
- * 斑馬線端點會吸附並切割人行道;斑馬線記錄它跨越的車道邊,
- * 供模擬判斷紅綠燈通行權。
+ * 斑馬線由人行道與馬路的幾何交叉處自動產生(見 crosswalks.ts),
+ * 交叉點會切割人行道;斑馬線記錄它跨越的車道邊,供模擬判斷紅綠燈通行權。
  */
 
 import type { Vec2 } from './bezier';
-import { pathToPolyline, type Network } from './network';
+import { deriveCrosswalks } from './crosswalks';
+import { LANE_WIDTH_M, pathToPolyline, type Network } from './network';
 import {
   nearestOnPolyline,
   polylineIntersections,
@@ -60,10 +61,12 @@ export function buildPedNetwork(scene: Scene, net: Network): PedNetwork {
     id: sw.id,
     pts: pathToPolyline(sw.path, proj),
   }));
-  const crossSegs = scene.crosswalks.map((cw) => ({
-    id: cw.id,
-    a: proj.toLocal(cw.a),
-    b: proj.toLocal(cw.b),
+  const roadLines = scene.roads.map((road) => ({ road, pts: pathToPolyline(road.path, proj) }));
+  const derivedCrosswalks = deriveCrosswalks(scene);
+  const crossSegs = derivedCrosswalks.map((d) => ({
+    id: d.crosswalk.id,
+    a: proj.toLocal(d.crosswalk.a),
+    b: proj.toLocal(d.crosswalk.b),
   }));
 
   // 1. 人行道之間的交點 + 斑馬線端點的吸附點 → 切割位置
@@ -74,6 +77,15 @@ export function buildPedNetwork(scene: Scene, net: Network): PedNetwork {
         cuts[i]!.push(h.sA);
         cuts[j]!.push(h.sB);
       }
+    }
+  }
+  // 人行道進出馬路兩側路緣的點也要切開人行道,讓落在馬路內的那段之後被捨棄、
+  // 改成走斑馬線,人行道才不會變成一條可以不受紅綠燈管制直接穿越馬路的路徑。
+  for (const d of derivedCrosswalks) {
+    const i = walkLines.findIndex((w) => w.id === d.sidewalkId);
+    if (i === -1) continue;
+    for (const pt of d.sidewalkCuts) {
+      cuts[i]!.push(nearestOnPolyline(walkLines[i]!.pts, proj.toLocal(pt)).s);
     }
   }
   // 斑馬線端點吸附:記住每端要接到的座標(人行道上的最近點)
@@ -133,6 +145,7 @@ export function buildPedNetwork(scene: Scene, net: Network): PedNetwork {
 
   for (let i = 0; i < walkLines.length; i++) {
     for (const part of splitPolyline(walkLines[i]!.pts, cuts[i]!)) {
+      if (isInsideAnyRoad(part, roadLines)) continue; // 落在馬路內的碎段改走斑馬線,不當一般人行道
       addPair(part, 'walk', [], null);
     }
   }
@@ -170,4 +183,17 @@ export function buildPedNetwork(scene: Scene, net: Network): PedNetwork {
   }
 
   return { nodes, edges, spawns };
+}
+
+/** 人行道碎段的中點是否落在任一馬路的路寬範圍內 */
+function isInsideAnyRoad(
+  part: Vec2[],
+  roadLines: Array<{ road: Scene['roads'][number]; pts: Vec2[] }>
+): boolean {
+  const mid = part[Math.floor(part.length / 2)];
+  if (mid === undefined) return false;
+  return roadLines.some(({ road, pts }) => {
+    const halfWidthM = ((road.lanesForward + road.lanesBackward) * LANE_WIDTH_M) / 2;
+    return nearestOnPolyline(pts, mid).distance < halfWidthM;
+  });
 }

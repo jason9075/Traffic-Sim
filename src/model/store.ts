@@ -44,7 +44,6 @@ export class SceneStore {
     return (
       s.roads.find((e) => e.id === id) ??
       s.sidewalks.find((e) => e.id === id) ??
-      s.crosswalks.find((e) => e.id === id) ??
       s.lights.find((e) => e.id === id) ??
       s.spawns.find((e) => e.id === id)
     );
@@ -54,7 +53,6 @@ export class SceneStore {
     this.update((s) => {
       s.roads = s.roads.filter((e) => e.id !== id);
       s.sidewalks = s.sidewalks.filter((e) => e.id !== id);
-      s.crosswalks = s.crosswalks.filter((e) => e.id !== id);
       s.lights = s.lights.filter((e) => e.id !== id);
       s.spawns = s.spawns.filter((e) => e.id !== id);
       s.lightGroups = s.lightGroups
@@ -110,7 +108,6 @@ function isScene(v: unknown): v is Scene {
     s.version === 1 &&
     Array.isArray(s.roads) &&
     Array.isArray(s.sidewalks) &&
-    Array.isArray(s.crosswalks) &&
     Array.isArray(s.lights) &&
     Array.isArray(s.spawns)
   );
