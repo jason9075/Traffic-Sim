@@ -27,7 +27,7 @@ function road(id: string, from: [number, number], to: [number, number]): Road {
   return {
     id, kind: 'road',
     path: { anchors: [anchor(...from), anchor(...to)] },
-    lanes: 1, speedLimit: 50,
+    lanes: 1, laneDirections: ['forward'], speedLimit: 50,
   };
 }
 function sidewalk(id: string, from: [number, number], to: [number, number]): Sidewalk {

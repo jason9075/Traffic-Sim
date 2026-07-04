@@ -7,10 +7,16 @@ import type maplibregl from 'maplibre-gl';
 import type { Editor } from '../editor/editor';
 import { geocode } from '../map/map';
 import { newId, type SceneStore } from '../model/store';
-import type { LightGroup } from '../model/types';
+import type { LaneDirection, LightGroup } from '../model/types';
 
 /** 手機版(pointer: coarse)右側收合圖示對應的面板 key */
 type DockPanel = 'search' | 'props' | 'scene';
+
+const LANE_DIRECTION_OPTIONS: Array<{ value: LaneDirection; label: string }> = [
+  { value: 'forward', label: '去向' },
+  { value: 'backward', label: '來向' },
+  { value: 'both', label: '雙向' },
+];
 
 export function createPanel(
   container: HTMLElement,
@@ -169,7 +175,7 @@ function buildSceneBox(box: HTMLElement, store: SceneStore, editor: Editor): voi
   const hint = document.createElement('p');
   hint.className = 'hint';
   hint.textContent =
-    '快捷鍵 1–6 切換工具。畫路/人行道:點擊放錨點、按住拖曳拉出弧度,雙擊或 Enter 完成後自動切回移動模式,Esc 取消。' +
+    '快捷鍵 1–6 切換工具。畫路/人行道:點擊放錨點、按住拖曳拉出弧度,雙擊或 Enter 完成後自動切成選取模式,Esc 取消。' +
     '人行道穿過馬路的路口會自動生成斑馬線。Delete 刪除選取。';
   box.appendChild(hint);
 
@@ -240,7 +246,7 @@ function renderProps(
   box.innerHTML = `<h3>${kindLabel(el.kind)}</h3>`;
 
   switch (el.kind) {
-    case 'road':
+    case 'road': {
       box.appendChild(
         numberField('速限 (km/h)', el.speedLimit, 10, 110, (v) => {
           store.update(() => { el.speedLimit = v; });
@@ -248,10 +254,24 @@ function renderProps(
       );
       box.appendChild(
         numberField('車道數', el.lanes, 1, 8, (v) => {
-          store.update(() => { el.lanes = v; });
+          store.setRoadLanes(el.id, v);
+          renderProps(box, store, editor, id); // 車道數變動後,下面的方向清單要跟著重繪
         })
       );
+      const laneHeader = document.createElement('p');
+      laneHeader.className = 'hint';
+      laneHeader.style.marginTop = '8px';
+      laneHeader.textContent = '各車道方向(索引 1 = 第一車道)';
+      box.appendChild(laneHeader);
+      el.laneDirections.forEach((dir, i) => {
+        box.appendChild(
+          selectField(`車道 ${i + 1}`, dir, LANE_DIRECTION_OPTIONS, (v) => {
+            store.update(() => { el.laneDirections[i] = v; });
+          })
+        );
+      });
       break;
+    }
     case 'light': {
       box.appendChild(
         numberField('綠燈 (秒)', el.timing.green, 5, 180, (v) => {
@@ -365,6 +385,32 @@ function numberField(
     if (Number.isFinite(v)) onChange(Math.min(max, Math.max(min, v)));
   });
   wrap.append(span, input);
+  return wrap;
+}
+
+function selectField<T extends string>(
+  label: string,
+  value: T,
+  options: Array<{ value: T; label: string }>,
+  onChange: (v: T) => void
+): HTMLElement {
+  const wrap = document.createElement('label');
+  wrap.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:8px;margin:4px 0';
+  const span = document.createElement('span');
+  span.textContent = label;
+  const select = document.createElement('select');
+  select.style.cssText =
+    'background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);' +
+    'border-radius:6px;color:#eee;padding:4px 6px;font-size:13px';
+  for (const opt of options) {
+    const o = document.createElement('option');
+    o.value = opt.value;
+    o.textContent = opt.label;
+    o.selected = opt.value === value;
+    select.appendChild(o);
+  }
+  select.addEventListener('change', () => onChange(select.value as T));
+  wrap.append(span, select);
   return wrap;
 }
 

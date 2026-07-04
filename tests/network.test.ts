@@ -23,6 +23,7 @@ function straightRoad(id: string, from: [number, number], to: [number, number], 
     kind: 'road',
     path: { anchors: [anchor(...from), anchor(...to)] },
     lanes: 1,
+    laneDirections: ['forward'],
     speedLimit: 50,
     ...opts,
   };

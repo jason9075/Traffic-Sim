@@ -6,6 +6,7 @@
 import type maplibregl from 'maplibre-gl';
 
 import { nearestPointOnCubic, dist, type Vec2 } from '../geometry/bezier';
+import { allLaneEnds, type LaneEnd, type RoadEnd } from '../geometry/laneConnections';
 import { newId, type SceneStore } from '../model/store';
 import {
   TW_DEFAULTS,
@@ -15,7 +16,7 @@ import {
   type Sidewalk,
 } from '../model/types';
 import type { Overlay } from './overlay';
-import { anchorsToSegments, metersPerPixel, project } from './render';
+import { anchorsToSegments, laneHandleScreenPos, metersPerPixel, project } from './render';
 import { findPathSnap, type PathSnap } from './snapping';
 
 export type Tool = 'pan' | 'select' | 'road' | 'sidewalk' | 'light' | 'spawn';
@@ -37,16 +38,22 @@ export interface EditorView {
   multiSelect: string[];
   /** 拖曳既有路徑端點且吸附到另一條路徑的端點或中段時,提示吸附位置與種類 */
   dragSnapHint: PathSnap | null;
+  /** 選取馬路時,目前選取的車道連線(供 Delete 用) */
+  selectedConnectionId: string | null;
+  /** 拖曳中的車道把手,供畫橡皮筋連線用 */
+  laneHandleDrag: { at: Vec2; roadId: string; lane: number; end: RoadEnd } | null;
 }
 
 type DragTarget =
   | { type: 'anchor'; id: string; index: number }
   | { type: 'handle'; id: string; index: number; side: 'hIn' | 'hOut' }
-  | { type: 'point'; id: string; field: 'at' };
+  | { type: 'point'; id: string; field: 'at' }
+  | { type: 'laneHandle'; roadId: string; lane: number; end: RoadEnd };
 
 const ANCHOR_HIT_PX = 8;
 const HANDLE_HIT_PX = 7;
 const POINT_HIT_PX = 14;
+const LANE_HANDLE_SNAP_PX = 16;
 
 export class Editor {
   private readonly map: maplibregl.Map;
@@ -66,6 +73,10 @@ export class Editor {
   private multiSelect = new Set<string>();
   /** 拖曳既有路徑端點時,若吸附到另一條路徑,記錄提示位置與種類 */
   private dragSnapHint: PathSnap | null = null;
+  /** 選取馬路時,目前選取的車道連線(供 Delete 用) */
+  private selectedConnectionId: string | null = null;
+  /** 拖曳車道把手時,目前吸附到的另一個把手(場景內任何車道端點皆可) */
+  private laneHandleSnap: LaneEnd | null = null;
 
   /** 視圖或選取變更時通知(重繪、更新面板) */
   onViewChange: (() => void) | null = null;
@@ -94,6 +105,11 @@ export class Editor {
       draft: this.draft,
       multiSelect: [...this.multiSelect],
       dragSnapHint: this.dragSnapHint,
+      selectedConnectionId: this.selectedConnectionId,
+      laneHandleDrag:
+        this.drag?.type === 'laneHandle' && this.cursor !== null
+          ? { at: this.cursor, roadId: this.drag.roadId, lane: this.drag.lane, end: this.drag.end }
+          : null,
     };
   }
 
@@ -118,14 +134,15 @@ export class Editor {
   }
 
   /**
-   * 切換工具。keepSelection 只給 finishDrawing() 完稿後自動切回移動模式時用,
-   * 讓剛畫完的路還能馬上在屬性面板調整(車道數等);使用者自己點「移動」按鈕/快捷鍵時仍會取消選取。
+   * 切換工具。keepSelection 只給 finishDrawing() 完稿後自動切成選取模式時用,
+   * 讓剛畫完的路還能馬上在選取模式調整車道等屬性;使用者自己點「移動」按鈕/快捷鍵時仍會取消選取。
    */
   setTool(tool: Tool, opts: { keepSelection?: boolean } = {}): void {
     if (this.locked && tool !== 'pan') return;
     if (this.tool === tool) return;
     this.commitDraft();
     this.clearMultiSelect();
+    this.selectedConnectionId = null;
     this.tool = tool;
     if (tool === 'pan' && !opts.keepSelection) this.select(null);
     this.overlay.setActive(tool !== 'pan');
@@ -137,6 +154,7 @@ export class Editor {
   select(id: string | null): void {
     if (this.selectedId === id) return;
     this.selectedId = id;
+    this.selectedConnectionId = null;
     this.onSelectionChange?.(id);
     this.notify();
   }
@@ -239,7 +257,11 @@ export class Editor {
         }
       }
     } else if (this.drag !== null) {
-      this.applyDrag(geo, e.altKey);
+      if (this.drag.type === 'laneHandle') {
+        this.updateLaneHandleSnap(this.cursor);
+      } else {
+        this.applyDrag(geo, e.altKey);
+      }
     }
     // 純 hover(尚未開始畫、也沒在拖曳)也要重繪,否則吸附提示只能靠地圖恰好重繪時才會出現
     this.notify();
@@ -250,6 +272,10 @@ export class Editor {
     if (this.middlePan !== null) {
       this.middlePan = null;
       return;
+    }
+    if (this.drag?.type === 'laneHandle') {
+      this.commitLaneConnection();
+      this.laneHandleSnap = null;
     }
     if (this.draft !== null) {
       this.draft.dragging = false;
@@ -286,7 +312,11 @@ export class Editor {
         break;
       case 'Delete':
       case 'Backspace':
-        if (this.selectedId !== null) {
+        if (this.selectedConnectionId !== null) {
+          this.store.removeLaneConnection(this.selectedConnectionId);
+          this.selectedConnectionId = null;
+          this.notify();
+        } else if (this.selectedId !== null) {
           this.store.removeById(this.selectedId);
           this.select(null);
         }
@@ -318,11 +348,11 @@ export class Editor {
     this.notify();
   }
 
-  /** 使用者主動完成繪製(雙擊/Enter/手機確定鈕共用):送出路徑後自動切回移動模式 */
+  /** 使用者主動完成繪製(雙擊/Enter/手機確定鈕共用):送出路徑後自動切成選取模式,方便馬上調整車道等屬性 */
   private finishDrawing(): void {
     const hadDraft = this.draft !== null;
     this.commitDraft();
-    if (hadDraft) this.setTool('pan', { keepSelection: true });
+    if (hadDraft) this.setTool('select', { keepSelection: true });
   }
 
   private commitDraft(): void {
@@ -340,6 +370,7 @@ export class Editor {
           kind: 'road',
           path: { anchors: draft.anchors },
           lanes: 1,
+          laneDirections: ['forward'],
           speedLimit: TW_DEFAULTS.speedLimit,
         };
         s.roads.push(road);
@@ -349,6 +380,64 @@ export class Editor {
       }
     });
     this.select(id);
+  }
+
+  // ---- 車道連線(選取馬路後直接編輯,不需要另外的路口工具)----
+
+  /** 找出場景內某個車道端點目前的螢幕座標,找不到對應道路時回傳 null */
+  private laneEndScreenPos(roadId: string, lane: number, end: RoadEnd): Vec2 | null {
+    const road = this.store.get().roads.find((r) => r.id === roadId);
+    return road === undefined ? null : laneHandleScreenPos(this.map, road, end, lane);
+  }
+
+  private updateLaneHandleSnap(screen: Vec2): void {
+    const drag = this.drag;
+    if (drag?.type !== 'laneHandle') return;
+    const scene = this.store.get();
+    let best: { end: LaneEnd; d: number } | null = null;
+    for (const le of allLaneEnds(scene)) {
+      if (le.roadId === drag.roadId && le.lane === drag.lane && le.end === drag.end) continue;
+      const pos = this.laneEndScreenPos(le.roadId, le.lane, le.end);
+      if (pos === null) continue;
+      const d = dist(pos, screen);
+      if (d < LANE_HANDLE_SNAP_PX && (best === null || d < best.d)) best = { end: le, d };
+    }
+    this.laneHandleSnap = best?.end ?? null;
+  }
+
+  private commitLaneConnection(): void {
+    const drag = this.drag;
+    const target = this.laneHandleSnap;
+    if (drag?.type !== 'laneHandle' || target === null) return;
+    if (target.roadId === drag.roadId && target.lane === drag.lane && target.end === drag.end) return;
+
+    this.store.update((s) => {
+      const isDup = s.laneConnections.some(
+        (c) =>
+          (c.fromRoadId === drag.roadId &&
+            c.fromLane === drag.lane &&
+            c.fromEnd === drag.end &&
+            c.toRoadId === target.roadId &&
+            c.toLane === target.lane &&
+            c.toEnd === target.end) ||
+          (c.toRoadId === drag.roadId &&
+            c.toLane === drag.lane &&
+            c.toEnd === drag.end &&
+            c.fromRoadId === target.roadId &&
+            c.fromLane === target.lane &&
+            c.fromEnd === target.end)
+      );
+      if (isDup) return;
+      s.laneConnections.push({
+        id: newId('lc'),
+        fromRoadId: drag.roadId,
+        fromLane: drag.lane,
+        fromEnd: drag.end,
+        toRoadId: target.roadId,
+        toLane: target.lane,
+        toEnd: target.end,
+      });
+    });
   }
 
   // ---- select tool ----
@@ -366,6 +455,39 @@ export class Editor {
       return;
     }
     this.clearMultiSelect();
+
+    // 0. 目前選取的是馬路時,優先處理車道端點(深紅色 anchor)的拖曳,以及既有連線的選取(供 Delete 用)
+    if (this.selectedId !== null) {
+      const selectedRoad = this.store.get().roads.find((r) => r.id === this.selectedId);
+      if (selectedRoad !== undefined) {
+        for (let lane = 0; lane < selectedRoad.lanes; lane++) {
+          for (const end of ['head', 'tail'] as const) {
+            const pos = laneHandleScreenPos(this.map, selectedRoad, end, lane);
+            if (dist(pos, screen) < POINT_HIT_PX) {
+              this.selectedConnectionId = null;
+              this.drag = { type: 'laneHandle', roadId: selectedRoad.id, lane, end };
+              this.notify();
+              return;
+            }
+          }
+        }
+        const related = this.store
+          .get()
+          .laneConnections.filter((c) => c.fromRoadId === selectedRoad.id || c.toRoadId === selectedRoad.id);
+        for (const c of related) {
+          const a = this.laneEndScreenPos(c.fromRoadId, c.fromLane, c.fromEnd);
+          const b = this.laneEndScreenPos(c.toRoadId, c.toLane, c.toEnd);
+          if (a === null || b === null) continue;
+          const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+          if (dist(mid, screen) < POINT_HIT_PX) {
+            this.selectedConnectionId = c.id;
+            this.notify();
+            return;
+          }
+        }
+      }
+    }
+    this.selectedConnectionId = null;
 
     // 1. 已選取路徑的錨點 / handle
     const selectedPath = this.getSelectedPath();
@@ -432,7 +554,7 @@ export class Editor {
 
   private applyDrag(geo: GeoPoint, breakMirror: boolean): void {
     const drag = this.drag;
-    if (drag === null) return;
+    if (drag === null || drag.type === 'laneHandle') return;
     this.store.update((s) => {
       if (drag.type === 'point') {
         const el = this.store.findById(drag.id);

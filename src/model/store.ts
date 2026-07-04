@@ -2,7 +2,7 @@
  * 場景狀態管理:單一 Scene 物件 + 變更通知 + localStorage 自動存檔。
  */
 
-import { emptyScene, type Road, type Scene, type SceneElement } from './types';
+import { emptyScene, type LaneDirection, type Road, type Scene, type SceneElement } from './types';
 
 const STORAGE_KEY = 'traffic-sim:scene';
 const AUTOSAVE_DELAY_MS = 800;
@@ -58,6 +58,29 @@ export class SceneStore {
       s.lightGroups = s.lightGroups
         .map((g) => ({ ...g, lightIds: g.lightIds.filter((lid) => lid !== id) }))
         .filter((g) => g.lightIds.length > 1);
+      s.laneConnections = s.laneConnections.filter(
+        (c) => c.fromRoadId !== id && c.toRoadId !== id
+      );
+    });
+  }
+
+  /** 移除單一路口連線規劃 */
+  removeLaneConnection(id: string): void {
+    this.update((s) => {
+      s.laneConnections = s.laneConnections.filter((c) => c.id !== id);
+    });
+  }
+
+  /** 調整車道數,同步裁切/補齊 laneDirections,並移除索引超出新車道數的 laneConnections */
+  setRoadLanes(roadId: string, lanes: number): void {
+    this.update((s) => {
+      const road = s.roads.find((r) => r.id === roadId);
+      if (road === undefined) return;
+      road.lanes = lanes;
+      road.laneDirections = normalizeLaneDirections(road.laneDirections, lanes);
+      s.laneConnections = s.laneConnections.filter(
+        (c) => !(c.fromRoadId === roadId && c.fromLane >= lanes) && !(c.toRoadId === roadId && c.toLane >= lanes)
+      );
     });
   }
 
@@ -113,20 +136,39 @@ function isScene(v: unknown): v is Scene {
   );
 }
 
-/** 補上舊存檔沒有的欄位(lightGroups),並把舊版雙向車道欄位(lanesForward/lanesBackward)遷移成 lanes */
+/**
+ * 補上舊存檔沒有的欄位(lightGroups、laneConnections),
+ * 並把舊版雙向車道欄位(lanesForward/lanesBackward)遷移成 lanes,補齊 laneDirections。
+ */
 function normalizeScene(s: Scene): Scene {
   return {
     ...s,
     lightGroups: Array.isArray(s.lightGroups) ? s.lightGroups : [],
+    laneConnections: Array.isArray(s.laneConnections) ? s.laneConnections : [],
     roads: s.roads.map(normalizeRoad),
   };
 }
 
 function normalizeRoad(r: Road): Road {
   const legacy = r as unknown as Record<string, unknown>;
-  if (typeof legacy.lanesForward !== 'number') return r;
-  const lanes = legacy.lanesForward + (typeof legacy.lanesBackward === 'number' ? legacy.lanesBackward : 0);
-  return { id: r.id, kind: 'road', path: r.path, lanes, speedLimit: r.speedLimit };
+  const lanes =
+    typeof legacy.lanesForward === 'number'
+      ? legacy.lanesForward + (typeof legacy.lanesBackward === 'number' ? legacy.lanesBackward : 0)
+      : r.lanes;
+  return {
+    id: r.id,
+    kind: 'road',
+    path: r.path,
+    lanes,
+    speedLimit: r.speedLimit,
+    laneDirections: normalizeLaneDirections(legacy.laneDirections as LaneDirection[] | undefined, lanes),
+  };
+}
+
+/** 補齊/裁切車道方向陣列到指定長度,缺的補 'forward' */
+function normalizeLaneDirections(existing: LaneDirection[] | undefined, lanes: number): LaneDirection[] {
+  const arr = Array.isArray(existing) ? existing : [];
+  return Array.from({ length: lanes }, (_, i) => arr[i] ?? 'forward');
 }
 
 /** 產生元素 id */

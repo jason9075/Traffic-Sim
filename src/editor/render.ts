@@ -6,7 +6,8 @@ import type maplibregl from 'maplibre-gl';
 
 import { evalCubic, evalCubicDeriv, type Vec2, type CubicSegment } from '../geometry/bezier';
 import { deriveCrosswalks } from '../geometry/crosswalks';
-import type { Anchor, GeoPoint, Scene } from '../model/types';
+import { laneDirectionsConflict, type RoadEnd } from '../geometry/laneConnections';
+import type { Anchor, GeoPoint, LaneDirection, Road, Scene } from '../model/types';
 import type { EditorView } from './editor';
 import { findPathSnap } from './snapping';
 
@@ -24,7 +25,15 @@ const COLORS = {
   selection: '#3b82f6',
   spawn: '#2563eb',
   snapHint: '#22c55e',
+  warning: '#f59e0b',
+  laneAnchor: '#7f1d1d',
 } as const;
+
+/** 車道方向箭頭顏色:去向/來向各一色,雙向兩個箭頭各用自己的顏色 */
+const LANE_DIR_ARROW_COLORS: Record<'forward' | 'backward', string> = {
+  forward: '#4ade80',
+  backward: '#60a5fa',
+};
 
 export function project(map: maplibregl.Map, g: GeoPoint): Vec2 {
   const p = map.project([g.lng, g.lat]);
@@ -88,6 +97,51 @@ function laneDividerOffsetsM(lanes: number): number[] {
   const halfWidthM = (lanes * LANE_WIDTH_M) / 2;
   for (let i = 1; i < lanes; i++) offsets.push(-halfWidthM + i * LANE_WIDTH_M);
   return offsets;
+}
+
+/** 每條車道「中心線」相對路徑中心的偏移量(公尺),用於路口把手定位 */
+function laneCenterOffsetsM(lanes: number): number[] {
+  const halfWidthM = (lanes * LANE_WIDTH_M) / 2;
+  return Array.from({ length: lanes }, (_, i) => -halfWidthM + (i + 0.5) * LANE_WIDTH_M);
+}
+
+/** 某條路在指定端點(head/tail)、指定車道的把手螢幕座標(往路外側稍微推出,避免多路交會時重疊) */
+export function laneHandleScreenPos(map: maplibregl.Map, road: Road, end: RoadEnd, lane: number): Vec2 {
+  const segs = anchorsToSegments(map, road.path.anchors);
+  const seg = end === 'head' ? segs[0]! : segs[segs.length - 1]!;
+  const t = end === 'head' ? 0 : 1;
+  const p = evalCubic(seg, t);
+  // evalCubicDeriv 在控制點退化(hIn/hOut 為 null,即沒拉過弧度)時,端點切線量值恰為 0,
+  // 會讓頭尾把手全部疊在同一點;改用有限差分取一小段弧近似方向,穩定不受退化控制點影響。
+  const eps = 0.05;
+  const near = end === 'head' ? evalCubic(seg, eps) : evalCubic(seg, 1 - eps);
+  const d = end === 'head' ? { x: near.x - p.x, y: near.y - p.y } : { x: p.x - near.x, y: p.y - near.y };
+  const len = Math.hypot(d.x, d.y) || 1;
+  const pxPerMeter = 1 / metersPerPixel(map);
+  const offsetPx = (laneCenterOffsetsM(road.lanes)[lane] ?? 0) * pxPerMeter;
+  const outward = end === 'head' ? -1 : 1;
+  return {
+    x: p.x + (-d.y / len) * offsetPx + outward * (d.x / len) * 10,
+    y: p.y + (d.x / len) * offsetPx + outward * (d.y / len) * 10,
+  };
+}
+
+/** 車道中心線大約中點的螢幕座標與切線方向(單位向量),供畫方向箭頭用 */
+function laneMidScreenPosAndDir(map: maplibregl.Map, road: Road, lane: number): { pos: Vec2; dir: Vec2 } {
+  const segs = anchorsToSegments(map, road.path.anchors);
+  const seg = segs[Math.floor((segs.length - 1) / 2)]!;
+  const p = evalCubic(seg, 0.5);
+  const eps = 0.05;
+  const near = evalCubic(seg, 0.5 + eps);
+  const d = { x: near.x - p.x, y: near.y - p.y };
+  const len = Math.hypot(d.x, d.y) || 1;
+  const dir = { x: d.x / len, y: d.y / len };
+  const pxPerMeter = 1 / metersPerPixel(map);
+  const offsetPx = (laneCenterOffsetsM(road.lanes)[lane] ?? 0) * pxPerMeter;
+  return {
+    pos: { x: p.x + -dir.y * offsetPx, y: p.y + dir.x * offsetPx },
+    dir,
+  };
 }
 
 function pathFromSegments(segs: CubicSegment[]): Path2D {
@@ -198,6 +252,45 @@ export function renderScene(
     ctx.stroke();
     drawArrow(ctx, { x: p.x, y: p.y }, { x: 1, y: 0 }, 5, '#fff');
     ctx.restore();
+  }
+
+  // 車道連線:一律畫線(方向衝突畫紅色並常駐顯示黃色驚嘆號,不受目前工具影響)
+  for (const c of scene.laneConnections) {
+    const fromRoad = scene.roads.find((r) => r.id === c.fromRoadId);
+    const toRoad = scene.roads.find((r) => r.id === c.toRoadId);
+    if (fromRoad === undefined || toRoad === undefined) continue;
+    const a = laneHandleScreenPos(map, fromRoad, c.fromEnd, c.fromLane);
+    const b = laneHandleScreenPos(map, toRoad, c.toEnd, c.toLane);
+    const invalid = laneDirectionsConflict(
+      fromRoad.laneDirections[c.fromLane] ?? 'forward',
+      toRoad.laneDirections[c.toLane] ?? 'forward'
+    );
+    drawConnectionLine(ctx, a, b, invalid, c.id === view.selectedConnectionId);
+    if (invalid) drawJunctionWarning(ctx, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  }
+
+  // 選取模式選中馬路時:顯示每條車道的編號/方向箭頭/深紅色 anchor,並可拖曳 anchor 建立連線
+  if (view.tool === 'select' && view.selectedId !== null) {
+    const selectedRoad = scene.roads.find((r) => r.id === view.selectedId);
+    if (selectedRoad !== undefined) {
+      for (let lane = 0; lane < selectedRoad.lanes; lane++) {
+        const direction = selectedRoad.laneDirections[lane] ?? 'forward';
+        const { pos: midPos, dir: midDir } = laneMidScreenPosAndDir(map, selectedRoad, lane);
+        drawLaneDirectionArrows(ctx, midPos, midDir, direction);
+        for (const end of ['head', 'tail'] as const) {
+          drawLaneAnchor(ctx, laneHandleScreenPos(map, selectedRoad, end, lane), lane + 1);
+        }
+      }
+      if (view.laneHandleDrag !== null && view.laneHandleDrag.roadId === selectedRoad.id) {
+        const start = laneHandleScreenPos(
+          map,
+          selectedRoad,
+          view.laneHandleDrag.end,
+          view.laneHandleDrag.lane
+        );
+        drawConnectionLine(ctx, start, view.laneHandleDrag.at, false, false, true);
+      }
+    }
   }
 
   // 繪製中的草稿路徑
@@ -394,5 +487,90 @@ function drawTrafficLight(
     ctx.fillText(groupBadge, bx, by + 0.5);
     ctx.textAlign = 'left';
   }
+  ctx.restore();
+}
+
+/** 連線方向不合理時,常駐顯示在連線中點的黃色驚嘆號徽章 */
+function drawJunctionWarning(ctx: CanvasRenderingContext2D, p: Vec2): void {
+  ctx.save();
+  ctx.fillStyle = COLORS.warning;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#1f2937';
+  ctx.font = 'bold 10px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('!', p.x, p.y + 0.5);
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+/** 選取馬路時,每個車道頭尾的深紅色可拖曳 anchor,中間標車道編號 */
+function drawLaneAnchor(ctx: CanvasRenderingContext2D, p: Vec2, laneNumber: number): void {
+  ctx.save();
+  ctx.fillStyle = COLORS.laneAnchor;
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 9px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(String(laneNumber), p.x, p.y + 0.5);
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+/** 車道方向箭頭:去向/來向各畫一個箭頭,雙向兩個方向都畫、左右錯開避免重疊 */
+function drawLaneDirectionArrows(
+  ctx: CanvasRenderingContext2D,
+  p: Vec2,
+  dir: Vec2,
+  direction: LaneDirection
+): void {
+  if (direction === 'both') {
+    const perp = { x: -dir.y, y: dir.x };
+    const offset = 4;
+    drawArrow(
+      ctx,
+      { x: p.x + perp.x * offset, y: p.y + perp.y * offset },
+      dir,
+      6,
+      LANE_DIR_ARROW_COLORS.forward
+    );
+    drawArrow(
+      ctx,
+      { x: p.x - perp.x * offset, y: p.y - perp.y * offset },
+      { x: -dir.x, y: -dir.y },
+      6,
+      LANE_DIR_ARROW_COLORS.backward
+    );
+    return;
+  }
+  const arrowDir = direction === 'forward' ? dir : { x: -dir.x, y: -dir.y };
+  drawArrow(ctx, p, arrowDir, 7, LANE_DIR_ARROW_COLORS[direction]);
+}
+
+/** 兩個車道把手之間的連線規劃;dashed=拖曳中的橡皮筋線 */
+function drawConnectionLine(
+  ctx: CanvasRenderingContext2D,
+  a: Vec2,
+  b: Vec2,
+  invalid: boolean,
+  selected: boolean,
+  dashed = false
+): void {
+  ctx.save();
+  ctx.strokeStyle = invalid ? '#ef4444' : '#22c55e';
+  ctx.lineWidth = selected ? 3 : 2;
+  if (dashed) ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.stroke();
   ctx.restore();
 }

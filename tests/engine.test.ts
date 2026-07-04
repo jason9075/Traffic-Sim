@@ -20,6 +20,7 @@ function road(id: string, from: [number, number], to: [number, number]): Road {
     kind: 'road',
     path: { anchors: [anchor(...from), anchor(...to)] },
     lanes: 1,
+    laneDirections: ['forward'],
     speedLimit: 50,
   };
 }

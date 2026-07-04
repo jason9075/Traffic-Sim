@@ -25,6 +25,9 @@ export interface BezierPath {
   anchors: Anchor[];
 }
 
+/** 車道方向標籤:去向(順著繪製方向)、來向(逆著繪製方向)、雙向(兩向皆可) */
+export type LaneDirection = 'forward' | 'backward' | 'both';
+
 /**
  * 馬路。一律單向(沿繪製方向前進),車道間以白色虛線分隔。
  * 雙向道路請另外反向再拉一條路。
@@ -35,6 +38,8 @@ export interface Road {
   path: BezierPath;
   /** 車道數 */
   lanes: number;
+  /** 每條車道的方向標籤,長度等於 lanes,索引對應車道排列順序 */
+  laneDirections: LaneDirection[];
   /** 速限 km/h(台灣市區預設 50) */
   speedLimit: number;
 }
@@ -101,6 +106,20 @@ export interface LightGroup {
   offsetSec: number;
 }
 
+/**
+ * 路口內兩條路特定車道端點的連線規劃。純使用者標記,只影響編輯器視覺化,不影響模擬。
+ * end 只接受頭尾端點,不支援 T 字路口中段(被穿過的那條路在觸碰點沒有真正的車道端點)。
+ */
+export interface LaneConnection {
+  id: string;
+  fromRoadId: string;
+  fromLane: number;
+  fromEnd: 'head' | 'tail';
+  toRoadId: string;
+  toLane: number;
+  toEnd: 'head' | 'tail';
+}
+
 /** 完整場景(可序列化) */
 export interface Scene {
   version: 1;
@@ -110,6 +129,7 @@ export interface Scene {
   lights: TrafficLight[];
   spawns: SpawnPoint[];
   lightGroups: LightGroup[];
+  laneConnections: LaneConnection[];
 }
 
 /** 台灣市區預設值 */
@@ -130,5 +150,6 @@ export function emptyScene(name = '未命名場景'): Scene {
     lights: [],
     spawns: [],
     lightGroups: [],
+    laneConnections: [],
   };
 }
