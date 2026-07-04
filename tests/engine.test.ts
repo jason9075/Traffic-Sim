@@ -19,8 +19,7 @@ function road(id: string, from: [number, number], to: [number, number]): Road {
     id,
     kind: 'road',
     path: { anchors: [anchor(...from), anchor(...to)] },
-    lanesForward: 1,
-    lanesBackward: 1,
+    lanes: 1,
     speedLimit: 50,
   };
 }
@@ -30,10 +29,10 @@ function runFor(engine: SimEngine, seconds: number, dt = 0.1): void {
   for (let i = 0; i < steps; i++) engine.step(dt);
 }
 
-/** 1km 直路,兩端各一個 spawn */
+/** 1km 直路(雙向,各自反向拉一條路),兩端各一個 spawn */
 function straightScene(vph: number): Scene {
   const s = emptyScene('t');
-  s.roads = [road('r1', [-500, 0], [500, 0])];
+  s.roads = [road('r1', [-500, 0], [500, 0]), road('r1_back', [500, 0], [-500, 0])];
   s.spawns = [
     { id: 'A', kind: 'spawn', at: geo(-500, 0), vehiclesPerHour: vph, pedsPerHour: 0 },
     { id: 'B', kind: 'spawn', at: geo(500, 0), vehiclesPerHour: vph, pedsPerHour: 0 },

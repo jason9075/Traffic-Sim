@@ -20,10 +20,12 @@ function project(map: maplibregl.Map, g: GeoPoint): Vec2 {
 export function findEndpointSnap(
   map: maplibregl.Map,
   scene: Scene,
-  screen: Vec2
+  screen: Vec2,
+  excludeId?: string
 ): GeoPoint | null {
   let best: { point: GeoPoint; d: number } | null = null;
   for (const el of [...scene.roads, ...scene.sidewalks]) {
+    if (el.id === excludeId) continue;
     const anchors = el.path.anchors;
     if (anchors.length === 0) continue;
     for (const a of [anchors[0]!, anchors[anchors.length - 1]!]) {

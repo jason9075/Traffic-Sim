@@ -27,7 +27,7 @@ function road(id: string, from: [number, number], to: [number, number]): Road {
   return {
     id, kind: 'road',
     path: { anchors: [anchor(...from), anchor(...to)] },
-    lanesForward: 1, lanesBackward: 1, speedLimit: 50,
+    lanes: 1, speedLimit: 50,
   };
 }
 function sidewalk(id: string, from: [number, number], to: [number, number]): Sidewalk {
@@ -41,7 +41,9 @@ function sidewalk(id: string, from: [number, number], to: [number, number]): Sid
 function pedScene(): { scene: Scene; timing: SignalTiming } {
   const scene = emptyScene('ped');
   scene.roads = [
-    road('ew', [-200, 0], [200, 0]),
+    // 雙向道路 = 反向另拉一條路
+    road('ew_fwd', [-200, 0], [200, 0]),
+    road('ew_back', [200, 0], [-200, 0]),
     road('ns', [0, -8], [0, 8]), // 讓路口有號誌意義;刻意比人行道短,避免又穿過南北兩側人行道
   ];
   scene.sidewalks = [
@@ -65,8 +67,9 @@ describe('buildPedNetwork', () => {
     const pedNet = buildPedNetwork(scene, net);
 
     const crossEdges = pedNet.edges.filter((e) => e.kind === 'cross');
-    expect(crossEdges.length).toBe(2); // 一對有向邊
-    // 斑馬線跨越東西向道路的兩個方向車道
+    // 雙向道路 = 兩條獨立單向路,各自在交叉處產生一段斑馬線(各一對有向邊)
+    expect(crossEdges.length).toBe(4);
+    // 每段斑馬線都跨越東西向道路的兩個方向車道
     expect(crossEdges[0]!.crossEdgeIds.length).toBeGreaterThanOrEqual(2);
     // 兩個 spawn 都綁上
     expect(pedNet.spawns.length).toBe(2);

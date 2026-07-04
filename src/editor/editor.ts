@@ -35,6 +35,8 @@ export interface EditorView {
   draft: DraftPath | null;
   /** 按住 Ctrl 多選中的紅綠燈 id(用於組成號誌群組) */
   multiSelect: string[];
+  /** 拖曳既有路徑端點且吸附到另一條路徑端點時,提示吸附位置 */
+  dragSnapHint: GeoPoint | null;
 }
 
 type DragTarget =
@@ -62,6 +64,8 @@ export class Editor {
   private middlePan: Vec2 | null = null;
   /** Ctrl+click 多選中的紅綠燈 id,插入順序 = 組內編號 */
   private multiSelect = new Set<string>();
+  /** 拖曳既有路徑端點時,若吸附到另一條路徑端點,記錄提示位置 */
+  private dragSnapHint: GeoPoint | null = null;
 
   /** 視圖或選取變更時通知(重繪、更新面板) */
   onViewChange: (() => void) | null = null;
@@ -89,6 +93,7 @@ export class Editor {
       cursor: this.cursor,
       draft: this.draft,
       multiSelect: [...this.multiSelect],
+      dragSnapHint: this.dragSnapHint,
     };
   }
 
@@ -253,7 +258,11 @@ export class Editor {
       this.draft.dragging = false;
       this.notify();
     }
-    this.drag = null;
+    if (this.drag !== null) {
+      this.drag = null;
+      this.dragSnapHint = null;
+      this.notify();
+    }
   }
 
   private onDblClick(e: MouseEvent): void {
@@ -333,8 +342,7 @@ export class Editor {
           id,
           kind: 'road',
           path: { anchors: draft.anchors },
-          lanesForward: 1,
-          lanesBackward: 1,
+          lanes: 1,
           speedLimit: TW_DEFAULTS.speedLimit,
         };
         s.roads.push(road);
@@ -395,8 +403,7 @@ export class Editor {
     // 3. 道路 / 人行道本體
     const mpp = metersPerPixel(this.map);
     for (const road of scene.roads) {
-      const widthPx =
-        ((road.lanesForward + road.lanesBackward) * 3.2) / mpp;
+      const widthPx = (road.lanes * 3.2) / mpp;
       if (this.hitPath(road.path.anchors, screen, Math.max(6, widthPx / 2))) {
         this.select(road.id);
         return;
@@ -444,9 +451,17 @@ export class Editor {
       const a = path?.anchors[drag.index];
       if (a === undefined) return;
       if (drag.type === 'anchor') {
-        const dLng = geo.lng - a.p.lng;
-        const dLat = geo.lat - a.p.lat;
-        a.p = geo;
+        // 拖曳的是路徑端點(頭或尾)時,靠近另一條路徑端點可直接吸附連接,方便延伸既有道路/人行道
+        const isEndpoint = path !== undefined && (drag.index === 0 || drag.index === path.anchors.length - 1);
+        const snap =
+          isEndpoint && this.cursor !== null
+            ? findEndpointSnap(this.map, s, this.cursor, drag.id)
+            : null;
+        this.dragSnapHint = snap;
+        const target = snap ?? geo;
+        const dLng = target.lng - a.p.lng;
+        const dLat = target.lat - a.p.lat;
+        a.p = target;
         if (a.hIn !== null) a.hIn = { lng: a.hIn.lng + dLng, lat: a.hIn.lat + dLat };
         if (a.hOut !== null) a.hOut = { lng: a.hOut.lng + dLng, lat: a.hOut.lat + dLat };
       } else {

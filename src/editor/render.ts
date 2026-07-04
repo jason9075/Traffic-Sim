@@ -4,7 +4,7 @@
 
 import type maplibregl from 'maplibre-gl';
 
-import type { Vec2, CubicSegment } from '../geometry/bezier';
+import { evalCubic, evalCubicDeriv, type Vec2, type CubicSegment } from '../geometry/bezier';
 import { deriveCrosswalks } from '../geometry/crosswalks';
 import type { Anchor, GeoPoint, Scene } from '../model/types';
 import type { EditorView } from './editor';
@@ -16,8 +16,6 @@ const LANE_WIDTH_M = 3.2;
 const COLORS = {
   road: '#3f4045',
   roadSelected: '#52545c',
-  centerLine: '#f5c542', // 台灣雙向道路中央線為黃色
-  edgeLine: '#e5e7eb',
   sidewalk: '#7cb47c',
   crosswalk: '#f3f4f6',
   draft: '#60a5fa',
@@ -57,6 +55,39 @@ export function anchorsToSegments(map: maplibregl.Map, anchors: Anchor[]): Cubic
     });
   }
   return segs;
+}
+
+/** 沿 cubic 曲線密集取樣後,每點依切線法向量偏移固定像素距離,近似畫出平行的偏移線 */
+function offsetSegmentPoints(segs: CubicSegment[], offsetPx: number): Vec2[] {
+  const SAMPLES_PER_SEG = 16;
+  const pts: Vec2[] = [];
+  for (const seg of segs) {
+    for (let i = 0; i <= SAMPLES_PER_SEG; i++) {
+      const t = i / SAMPLES_PER_SEG;
+      const p = evalCubic(seg, t);
+      const d = evalCubicDeriv(seg, t);
+      const len = Math.hypot(d.x, d.y) || 1;
+      pts.push({ x: p.x + (-d.y / len) * offsetPx, y: p.y + (d.x / len) * offsetPx });
+    }
+  }
+  return pts;
+}
+
+function strokeOffsetLine(ctx: CanvasRenderingContext2D, segs: CubicSegment[], offsetPx: number): void {
+  const pts = offsetSegmentPoints(segs, offsetPx);
+  if (pts.length < 2) return;
+  ctx.beginPath();
+  ctx.moveTo(pts[0]!.x, pts[0]!.y);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]!.x, pts[i]!.y);
+  ctx.stroke();
+}
+
+/** 每條車道之間白色分隔線,以路徑中心(0)為基準、車道群組左右對稱置中的偏移量(公尺) */
+function laneDividerOffsetsM(lanes: number): number[] {
+  const offsets: number[] = [];
+  const halfWidthM = (lanes * LANE_WIDTH_M) / 2;
+  for (let i = 1; i < lanes; i++) offsets.push(-halfWidthM + i * LANE_WIDTH_M);
+  return offsets;
 }
 
 function pathFromSegments(segs: CubicSegment[]): Path2D {
@@ -109,8 +140,7 @@ export function renderScene(
   for (const road of scene.roads) {
     const segs = anchorsToSegments(map, road.path.anchors);
     const path = pathFromSegments(segs);
-    const lanes = road.lanesForward + road.lanesBackward;
-    const widthPx = Math.max(4, lanes * LANE_WIDTH_M * pxPerMeter);
+    const widthPx = Math.max(4, road.lanes * LANE_WIDTH_M * pxPerMeter);
     const selected = road.id === view.selectedId;
 
     ctx.save();
@@ -121,18 +151,13 @@ export function renderScene(
     ctx.globalAlpha = 0.92;
     ctx.lineWidth = widthPx;
     ctx.stroke(path);
-    // 邊線
-    ctx.globalAlpha = 0.9;
-    ctx.strokeStyle = selected ? COLORS.selection : COLORS.edgeLine;
-    ctx.lineWidth = Math.max(1, 0.15 * pxPerMeter);
-    ctx.setLineDash([]);
-    ctx.stroke(path);
-    // 雙向道路中央線
-    if (road.lanesBackward > 0) {
-      ctx.strokeStyle = COLORS.centerLine;
-      ctx.lineWidth = Math.max(1, 0.15 * pxPerMeter);
-      ctx.setLineDash([10 * pxPerMeter * 0.3, 10 * pxPerMeter * 0.3]);
-      ctx.stroke(path);
+    // 車道之間的白色虛線分隔線(單向道路,無中央線)
+    ctx.strokeStyle = '#ffffff';
+    ctx.globalAlpha = 0.75;
+    ctx.lineWidth = Math.max(1, 0.1 * pxPerMeter);
+    ctx.setLineDash([2 * pxPerMeter, 2 * pxPerMeter]);
+    for (const offsetM of laneDividerOffsetsM(road.lanes)) {
+      strokeOffsetLine(ctx, segs, offsetM * pxPerMeter);
     }
     ctx.setLineDash([]);
     ctx.restore();
@@ -189,6 +214,9 @@ export function renderScene(
     const snap = findEndpointSnap(map, scene, view.cursor);
     if (snap !== null) drawSnapHint(ctx, project(map, snap));
   }
+
+  // 拖曳既有路徑端點靠近另一端點時提示吸附位置
+  if (view.dragSnapHint !== null) drawSnapHint(ctx, project(map, view.dragSnapHint));
 
   // 選取元素的錨點與 handle
   if (view.selectedId !== null) {

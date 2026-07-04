@@ -247,11 +247,8 @@ function renderProps(
         })
       );
       box.appendChild(
-        numberField('單向車道數', el.lanesForward, 1, 4, (v) => {
-          store.update(() => {
-            el.lanesForward = v;
-            el.lanesBackward = v;
-          });
+        numberField('車道數', el.lanes, 1, 8, (v) => {
+          store.update(() => { el.lanes = v; });
         })
       );
       break;

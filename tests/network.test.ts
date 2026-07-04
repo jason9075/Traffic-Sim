@@ -22,11 +22,15 @@ function straightRoad(id: string, from: [number, number], to: [number, number], 
     id,
     kind: 'road',
     path: { anchors: [anchor(...from), anchor(...to)] },
-    lanesForward: 1,
-    lanesBackward: 1,
+    lanes: 1,
     speedLimit: 50,
     ...opts,
   };
+}
+
+/** 雙向道路 = 使用者另外反向拉一條路,回傳兩條方向相反的 Road */
+function twoWayRoad(id: string, from: [number, number], to: [number, number]): Road[] {
+  return [straightRoad(`${id}_fwd`, from, to), straightRoad(`${id}_back`, to, from)];
 }
 
 function sceneWith(roads: Road[]): Scene {
@@ -55,27 +59,26 @@ describe('polyline utils', () => {
 });
 
 describe('buildNetwork', () => {
-  test('一條雙向直路 → 2 節點、2 條有向邊', () => {
+  test('一條路 → 2 節點、1 條有向邊(一律單向)', () => {
     const net = buildNetwork(sceneWith([straightRoad('r1', [-100, 0], [100, 0])]));
     expect(net.nodes.length).toBe(2);
-    expect(net.edges.length).toBe(2);
+    expect(net.edges.length).toBe(1);
     expect(net.edges[0]!.length).toBeCloseTo(200, 0);
     // 速限 50 km/h → 13.9 m/s
     expect(net.edges[0]!.speedLimit).toBeCloseTo(50 / 3.6, 2);
   });
 
-  test('單行道 → 只有 1 條有向邊', () => {
-    const net = buildNetwork(
-      sceneWith([straightRoad('r1', [-100, 0], [100, 0], { lanesBackward: 0 })])
-    );
-    expect(net.edges.length).toBe(1);
+  test('雙向道路(反向另拉一條) → 2 節點、2 條有向邊', () => {
+    const net = buildNetwork(sceneWith(twoWayRoad('r1', [-100, 0], [100, 0])));
+    expect(net.nodes.length).toBe(2);
+    expect(net.edges.length).toBe(2);
   });
 
-  test('十字路口 → 5 節點、8 條有向邊', () => {
+  test('十字路口(四臂皆雙向)→ 5 節點、8 條有向邊', () => {
     const net = buildNetwork(
       sceneWith([
-        straightRoad('ew', [-100, 0], [100, 0]),
-        straightRoad('ns', [0, -100], [0, 100]),
+        ...twoWayRoad('ew', [-100, 0], [100, 0]),
+        ...twoWayRoad('ns', [0, -100], [0, 100]),
       ])
     );
     // 中心 1 + 四端 4
@@ -84,7 +87,7 @@ describe('buildNetwork', () => {
     expect(net.edges.length).toBe(8);
   });
 
-  test('T 字路口(端點接到中段)→ 4 節點、6 條有向邊', () => {
+  test('T 字路口(端點接到中段)→ 4 節點、3 條有向邊', () => {
     const net = buildNetwork(
       sceneWith([
         straightRoad('main', [-100, 0], [100, 0]),
@@ -92,21 +95,19 @@ describe('buildNetwork', () => {
       ])
     );
     expect(net.nodes.length).toBe(4);
-    expect(net.edges.length).toBe(6);
+    expect(net.edges.length).toBe(3);
   });
 
-  test('雙向邊靠右偏移,兩方向的中心線不同', () => {
+  test('單向道路沿路徑中心線前進,不會自動偏移', () => {
     const net = buildNetwork(sceneWith([straightRoad('r1', [-100, 0], [100, 0])]));
-    const [fwd, back] = net.edges;
-    // 沿 +x 行進向右偏移 → y 為負;反向 → y 為正
-    expect(fwd!.pts[1]!.y).toBeLessThan(0);
-    expect(back!.pts[1]!.y).toBeGreaterThan(0);
+    // 直路沿 x 軸,沒有自動偏移的話 y 應該全程為 0
+    expect(net.edges[0]!.pts.every((p) => Math.abs(p.y) < 1e-6)).toBe(true);
   });
 
   test('紅綠燈與 spawn 吸附到節點', () => {
     const s = sceneWith([
-      straightRoad('ew', [-100, 0], [100, 0]),
-      straightRoad('ns', [0, -100], [0, 100]),
+      ...twoWayRoad('ew', [-100, 0], [100, 0]),
+      ...twoWayRoad('ns', [0, -100], [0, 100]),
     ]);
     s.lights.push({
       id: 'L1', kind: 'light', at: geo(5, 5), timing: { green: 40, yellow: 3, allRed: 2 },

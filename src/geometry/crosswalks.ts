@@ -38,7 +38,7 @@ export function deriveCrosswalks(scene: Scene): DerivedCrosswalk[] {
 
   const derived: DerivedCrosswalk[] = [];
   for (const { road, pts: roadPts } of roadLines) {
-    const halfWidthM = ((road.lanesForward + road.lanesBackward) * LANE_WIDTH_M) / 2;
+    const halfWidthM = (road.lanes * LANE_WIDTH_M) / 2;
     const edgeNear = offsetPolyline(roadPts, halfWidthM);
     const edgeFar = offsetPolyline(roadPts, -halfWidthM);
 

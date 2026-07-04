@@ -18,7 +18,9 @@ import {
 import { createProjection } from './projection';
 import type { Scene } from '../model/types';
 
-const SNAP_M = 6;
+// 車道最窄僅 3.2m(單線道),節點合併容差必須小於這個值,否則單線道斑馬線的
+// 兩端會被誤判成同一點而整段被丟棄(見下方 findOrCreateNode)。
+const SNAP_M = 2;
 /** 斑馬線端點找人行道的吸附半徑 */
 const CROSSWALK_SNAP_M = 15;
 const SPAWN_SNAP_M = 80;
@@ -193,7 +195,7 @@ function isInsideAnyRoad(
   const mid = part[Math.floor(part.length / 2)];
   if (mid === undefined) return false;
   return roadLines.some(({ road, pts }) => {
-    const halfWidthM = ((road.lanesForward + road.lanesBackward) * LANE_WIDTH_M) / 2;
+    const halfWidthM = (road.lanes * LANE_WIDTH_M) / 2;
     return nearestOnPolyline(pts, mid).distance < halfWidthM;
   });
 }

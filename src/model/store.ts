@@ -2,7 +2,7 @@
  * 場景狀態管理:單一 Scene 物件 + 變更通知 + localStorage 自動存檔。
  */
 
-import { emptyScene, type Scene, type SceneElement } from './types';
+import { emptyScene, type Road, type Scene, type SceneElement } from './types';
 
 const STORAGE_KEY = 'traffic-sim:scene';
 const AUTOSAVE_DELAY_MS = 800;
@@ -113,9 +113,20 @@ function isScene(v: unknown): v is Scene {
   );
 }
 
-/** 補上舊存檔沒有的欄位(目前:lightGroups) */
+/** 補上舊存檔沒有的欄位(lightGroups),並把舊版雙向車道欄位(lanesForward/lanesBackward)遷移成 lanes */
 function normalizeScene(s: Scene): Scene {
-  return { ...s, lightGroups: Array.isArray(s.lightGroups) ? s.lightGroups : [] };
+  return {
+    ...s,
+    lightGroups: Array.isArray(s.lightGroups) ? s.lightGroups : [],
+    roads: s.roads.map(normalizeRoad),
+  };
+}
+
+function normalizeRoad(r: Road): Road {
+  const legacy = r as unknown as Record<string, unknown>;
+  if (typeof legacy.lanesForward !== 'number') return r;
+  const lanes = legacy.lanesForward + (typeof legacy.lanesBackward === 'number' ? legacy.lanesBackward : 0);
+  return { id: r.id, kind: 'road', path: r.path, lanes, speedLimit: r.speedLimit };
 }
 
 /** 產生元素 id */

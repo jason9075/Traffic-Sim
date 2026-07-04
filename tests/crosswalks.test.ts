@@ -18,8 +18,7 @@ function road(id: string, from: [number, number], to: [number, number]): Road {
     id,
     kind: 'road',
     path: { anchors: [anchor(...from), anchor(...to)] },
-    lanesForward: 1,
-    lanesBackward: 1,
+    lanes: 2,
     speedLimit: 50,
   };
 }
@@ -48,7 +47,7 @@ describe('deriveCrosswalks', () => {
     expect(derived.length).toBe(1);
     const { crosswalk, sidewalkId } = derived[0]!;
     expect(sidewalkId).toBe('sw1');
-    // 雙向道路(2 車道 x 3.2m = 6.4m 寬)→ 斑馬線長度應接近路寬
+    // 2 車道 x 3.2m = 6.4m 寬 → 斑馬線長度應接近路寬
     const len = distMeters(crosswalk.a, crosswalk.b);
     expect(len).toBeGreaterThan(5);
     expect(len).toBeLessThan(8);

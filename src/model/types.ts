@@ -25,15 +25,16 @@ export interface BezierPath {
   anchors: Anchor[];
 }
 
-/** 馬路(台灣規則:靠右行駛;forward = 沿繪製方向) */
+/**
+ * 馬路。一律單向(沿繪製方向前進),車道間以白色虛線分隔。
+ * 雙向道路請另外反向再拉一條路。
+ */
 export interface Road {
   id: string;
   kind: 'road';
   path: BezierPath;
-  /** 順向車道數(MVP 固定 1) */
-  lanesForward: number;
-  /** 逆向車道數(0 = 單行道) */
-  lanesBackward: number;
+  /** 車道數 */
+  lanes: number;
   /** 速限 km/h(台灣市區預設 50) */
   speedLimit: number;
 }

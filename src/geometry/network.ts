@@ -6,10 +6,8 @@
 import { sampleCubicByArcLength, type CubicSegment, type Vec2 } from './bezier';
 import {
   nearestOnPolyline,
-  offsetPolyline,
   polylineIntersections,
   polylineLength,
-  reversePolyline,
   splitPolyline,
 } from './polyline';
 import { centroidOf, createProjection, type LocalProjection } from './projection';
@@ -137,30 +135,16 @@ export function buildNetwork(scene: Scene): Network {
       const toId = findOrCreateNode(part[part.length - 1]!);
       if (fromId === toId) continue;
 
-      // 台灣靠右:各方向偏移到自己車道群組的中心;單行道走中線
-      const forwardOffset = road.lanesBackward > 0 ? (road.lanesForward * LANE_WIDTH_M) / 2 : 0;
+      // 一律單向,沿路徑中心線前進(雙向道路由使用者另外反向拉一條路表示)
       edges.push({
         id: edges.length,
         from: fromId,
         to: toId,
-        pts: offsetPolyline(part, forwardOffset),
+        pts: part,
         length,
         speedLimit: speedMs,
         roadId: road.id,
       });
-      if (road.lanesBackward > 0) {
-        const backwardOffset = (road.lanesBackward * LANE_WIDTH_M) / 2;
-        const back = reversePolyline(part);
-        edges.push({
-          id: edges.length,
-          from: toId,
-          to: fromId,
-          pts: offsetPolyline(back, backwardOffset),
-          length,
-          speedLimit: speedMs,
-          roadId: road.id,
-        });
-      }
     }
   }
 
