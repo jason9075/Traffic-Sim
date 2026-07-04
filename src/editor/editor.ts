@@ -16,7 +16,7 @@ import {
 } from '../model/types';
 import type { Overlay } from './overlay';
 import { anchorsToSegments, metersPerPixel, project } from './render';
-import { findEndpointSnap } from './snapping';
+import { findPathSnap, type PathSnap } from './snapping';
 
 export type Tool = 'pan' | 'select' | 'road' | 'sidewalk' | 'light' | 'spawn';
 
@@ -35,8 +35,8 @@ export interface EditorView {
   draft: DraftPath | null;
   /** 按住 Ctrl 多選中的紅綠燈 id(用於組成號誌群組) */
   multiSelect: string[];
-  /** 拖曳既有路徑端點且吸附到另一條路徑端點時,提示吸附位置 */
-  dragSnapHint: GeoPoint | null;
+  /** 拖曳既有路徑端點且吸附到另一條路徑的端點或中段時,提示吸附位置與種類 */
+  dragSnapHint: PathSnap | null;
 }
 
 type DragTarget =
@@ -64,8 +64,8 @@ export class Editor {
   private middlePan: Vec2 | null = null;
   /** Ctrl+click 多選中的紅綠燈 id,插入順序 = 組內編號 */
   private multiSelect = new Set<string>();
-  /** 拖曳既有路徑端點時,若吸附到另一條路徑端點,記錄提示位置 */
-  private dragSnapHint: GeoPoint | null = null;
+  /** 拖曳既有路徑端點時,若吸附到另一條路徑,記錄提示位置與種類 */
+  private dragSnapHint: PathSnap | null = null;
 
   /** 視圖或選取變更時通知(重繪、更新面板) */
   onViewChange: (() => void) | null = null;
@@ -238,14 +238,11 @@ export class Editor {
           last.hIn = mirror(last.p, geo);
         }
       }
-      this.notify();
-      return;
-    }
-
-    if (this.drag !== null) {
+    } else if (this.drag !== null) {
       this.applyDrag(geo, e.altKey);
-      return;
     }
+    // 純 hover(尚未開始畫、也沒在拖曳)也要重繪,否則吸附提示只能靠地圖恰好重繪時才會出現
+    this.notify();
   }
 
   private onPointerUp(e: PointerEvent): void {
@@ -314,9 +311,9 @@ export class Editor {
         dragging: false,
       };
     }
-    // 靠近既有道路/人行道端點時直接吸附,方便從已鋪的路線延伸連接
-    const snap = findEndpointSnap(this.map, this.store.get(), screen);
-    this.draft.anchors.push({ p: snap ?? geo, hIn: null, hOut: null });
+    // 靠近既有道路/人行道端點或中段時直接吸附,方便從已鋪的路線延伸或拉出 T 字路口
+    const snap = findPathSnap(this.map, this.store.get(), screen);
+    this.draft.anchors.push({ p: snap?.point ?? geo, hIn: null, hOut: null });
     this.draft.dragging = true;
     this.notify();
   }
@@ -451,14 +448,12 @@ export class Editor {
       const a = path?.anchors[drag.index];
       if (a === undefined) return;
       if (drag.type === 'anchor') {
-        // 拖曳的是路徑端點(頭或尾)時,靠近另一條路徑端點可直接吸附連接,方便延伸既有道路/人行道
+        // 拖曳的是路徑端點(頭或尾)時,靠近另一條路徑可直接吸附連接,方便延伸既有道路/人行道
         const isEndpoint = path !== undefined && (drag.index === 0 || drag.index === path.anchors.length - 1);
         const snap =
-          isEndpoint && this.cursor !== null
-            ? findEndpointSnap(this.map, s, this.cursor, drag.id)
-            : null;
+          isEndpoint && this.cursor !== null ? findPathSnap(this.map, s, this.cursor, drag.id) : null;
         this.dragSnapHint = snap;
-        const target = snap ?? geo;
+        const target = snap?.point ?? geo;
         const dLng = target.lng - a.p.lng;
         const dLat = target.lat - a.p.lat;
         a.p = target;

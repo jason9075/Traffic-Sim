@@ -8,7 +8,7 @@ import { evalCubic, evalCubicDeriv, type Vec2, type CubicSegment } from '../geom
 import { deriveCrosswalks } from '../geometry/crosswalks';
 import type { Anchor, GeoPoint, Scene } from '../model/types';
 import type { EditorView } from './editor';
-import { findEndpointSnap } from './snapping';
+import { findPathSnap } from './snapping';
 
 /** 車道寬(公尺,台灣市區標準) */
 const LANE_WIDTH_M = 3.2;
@@ -205,18 +205,20 @@ export function renderScene(
     drawDraft(ctx, map, view.draft);
   }
 
-  // 畫路/人行道時,靠近既有端點提示可延伸連接
+  // 畫路/人行道時,靠近既有路徑端點或中段提示可延伸連接
   if (
     (view.tool === 'road' || view.tool === 'sidewalk') &&
     view.cursor !== null &&
     !(view.draft?.dragging ?? false)
   ) {
-    const snap = findEndpointSnap(map, scene, view.cursor);
-    if (snap !== null) drawSnapHint(ctx, project(map, snap));
+    const snap = findPathSnap(map, scene, view.cursor);
+    if (snap !== null) drawSnapHint(ctx, project(map, snap.point), snap.kind === 'endpoint');
   }
 
-  // 拖曳既有路徑端點靠近另一端點時提示吸附位置
-  if (view.dragSnapHint !== null) drawSnapHint(ctx, project(map, view.dragSnapHint));
+  // 拖曳既有路徑端點靠近另一條路徑時提示吸附位置
+  if (view.dragSnapHint !== null) {
+    drawSnapHint(ctx, project(map, view.dragSnapHint.point), view.dragSnapHint.kind === 'endpoint');
+  }
 
   // 選取元素的錨點與 handle
   if (view.selectedId !== null) {
@@ -258,17 +260,34 @@ function drawDraft(
   if (draft.cursor !== null && !isCoarsePointer()) drawFinishHint(ctx, draft.cursor);
 }
 
-function drawSnapHint(ctx: CanvasRenderingContext2D, p: Vec2): void {
+/**
+ * locked=true:鎖定既有路徑端點,畫雙圈實心提示,代表座標會完全對齊該端點。
+ * locked=false:吸附到路徑中段(T 字路口分支),畫較淡的單圈提示。
+ */
+function drawSnapHint(ctx: CanvasRenderingContext2D, p: Vec2, locked: boolean): void {
   ctx.save();
   ctx.strokeStyle = COLORS.snapHint;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(p.x, p.y, 9, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.fillStyle = COLORS.snapHint;
-  ctx.beginPath();
-  ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
-  ctx.fill();
+  if (locked) {
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 11, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = COLORS.snapHint;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.globalAlpha = 0.7;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([2, 2]);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
