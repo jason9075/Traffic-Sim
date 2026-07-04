@@ -13,6 +13,7 @@ import { createMap } from './map/map';
 import { SceneStore } from './model/store';
 import { renderSim, type SimFrame } from './render/simRender';
 import type { MainToWorker, WorkerToMain } from './sim/protocol';
+import { createMobileDraftBar } from './ui/mobileDraftBar';
 import { createPanel } from './ui/panel';
 import { createSimPanel, type SimPanel } from './ui/sim-panel';
 import { createToolbar } from './ui/toolbar';
@@ -125,6 +126,7 @@ const toolbar = createToolbar(mustGet('toolbar'), editor, () => {
   else exitSim();
 });
 createPanel(panelEl, map, store, editor);
+const mobileDraftBar = createMobileDraftBar(mustGet('app'), editor);
 
 // ---- 渲染迴圈(rAF 去抖動) ----
 
@@ -144,5 +146,8 @@ function requestRender(): void {
 
 map.on('render', requestRender);
 store.subscribe(requestRender);
-editor.onViewChange = requestRender;
+editor.onViewChange = () => {
+  requestRender();
+  mobileDraftBar.sync();
+};
 map.on('load', requestRender);

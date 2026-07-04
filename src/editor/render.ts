@@ -239,7 +239,12 @@ function drawDraft(
   }
   ctx.restore();
   drawAnchors(ctx, map, draft.anchors);
-  if (draft.cursor !== null) drawFinishHint(ctx, draft.cursor);
+  // 觸控裝置沒有 Enter/雙擊手勢不可靠,改用 #mobile-draft-bar 的按鈕,提示文字只在滑鼠裝置顯示
+  if (draft.cursor !== null && !isCoarsePointer()) drawFinishHint(ctx, draft.cursor);
+}
+
+function isCoarsePointer(): boolean {
+  return window.matchMedia('(pointer: coarse)').matches;
 }
 
 function drawFinishHint(ctx: CanvasRenderingContext2D, cursor: Vec2): void {

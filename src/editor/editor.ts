@@ -94,6 +94,18 @@ export class Editor {
     };
   }
 
+  /** 手機無鍵盤/雙擊不便,提供給底部「確定」按鈕呼叫,結束目前繪製路徑 */
+  finishDraft(): void {
+    this.commitDraft();
+  }
+
+  /** 提供給底部「取消」按鈕呼叫,捨棄目前繪製路徑 */
+  cancelDraft(): void {
+    if (this.draft === null) return;
+    this.draft = null;
+    this.notify();
+  }
+
   /** 清空紅綠燈多選(建立群組後或放棄時呼叫) */
   clearMultiSelect(): void {
     if (this.multiSelect.size === 0) return;
